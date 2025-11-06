@@ -45,7 +45,7 @@ def calculate_dft(df_segment):
         
     fs = 1.0 / T
 
-    # --- Start of Manual DFT Logic (from your code) ---
+
     x_detrended = signal - np.mean(signal)
 
     x_real = np.zeros(N)
@@ -64,15 +64,15 @@ def calculate_dft(df_segment):
 
     for k in range (half_N):
         MagDFT[k] = np.sqrt(np.square(x_real[k]) + np.square(x_imaj[k]))
-    # --- End of Manual DFT Logic ---
+    
 
-    # Calculate frequency axis in Hz (this is why we need fs)
+    
     xf_positive = np.arange(0, half_N) * fs / N
     
-    # Normalize magnitude (same as before)
+    
     yf_positive_magnitude = MagDFT * 2.0 / N
     if half_N > 0:
-        yf_positive_magnitude[0] = MagDFT[0] / N # DC component is not doubled
+        yf_positive_magnitude[0] = MagDFT[0] / N 
 
     return xf_positive, yf_positive_magnitude, fs
 
@@ -215,4 +215,5 @@ if uploaded_file is not None:
                 ax_dft.grid(True, which="both", ls="--")
                 ax_dft.legend()
                 st.pyplot(fig_dft, use_container_width=True)
+
                
