@@ -37,17 +37,7 @@ def calculate_dft(df_segment):
     if N_orig < 2:
         return np.array([]), np.array([]), 0
 
-    total_time_ms = time_ms[-1] - time_ms[0]
-    total_time_s = total_time_ms / 1000.0
-    
-    if total_time_s == 0:
-        return np.array([]), np.array([]), 0
-
-    T = total_time_s / (N_orig - 1)
-    if T == 0:
-        return np.array([]), np.array([]), 0
-        
-    fs = 1.0 / T
+    fs = 100.0
 
     
     x_detrended = original_signal - np.mean(original_signal)
