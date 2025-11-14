@@ -24,39 +24,50 @@ def create_full_plot(df):
     ax.legend()
     return fig
 
+
 @st.cache_data
 def calculate_dft(df_segment):
-    signal = df_segment['Value'].values
-    time_ms = df_segment['Index'].values
-    N = len(signal)
+    
+    N_dft = 200
 
-    if N < 2:
+    original_signal = df_segment['Value'].values
+    time_ms = df_segment['Index'].values
+    N_orig = len(original_signal)
+
+    if N_orig < 2:
         return np.array([]), np.array([]), 0
 
     total_time_ms = time_ms[-1] - time_ms[0]
     total_time_s = total_time_ms / 1000.0
     
-    if total_time_s == 0 or N < 2:
+    if total_time_s == 0:
         return np.array([]), np.array([]), 0
 
-    T = total_time_s / (N - 1)
+    T = total_time_s / (N_orig - 1)
     if T == 0:
         return np.array([]), np.array([]), 0
         
     fs = 1.0 / T
 
-
-    x_detrended = signal - np.mean(signal)
-
-    x_real = np.zeros(N)
-    x_imaj = np.zeros(N)
     
-    for k in range (N):
-        for n in range (N):
-            x_real[k] += x_detrended[n]*np.cos(2*np.pi*k*n/N)
-            x_imaj[k] -= x_detrended[n]*np.sin(2*np.pi*k*n/N)
+    x_detrended = original_signal - np.mean(original_signal)
     
-    half_N = round(N/2)
+    x_padded = np.zeros(N_dft)
+    
+    points_to_copy = min(N_orig, N_dft)
+    
+    x_padded[0:points_to_copy] = x_detrended[0:points_to_copy]
+    
+    
+    x_real = np.zeros(N_dft)
+    x_imaj = np.zeros(N_dft)
+    
+    for k in range (N_dft):
+        for n in range (N_dft):
+            x_real[k] += x_padded[n]*np.cos(2*np.pi*k*n/N_dft)
+            x_imaj[k] -= x_padded[n]*np.sin(2*np.pi*k*n/N_dft)
+    
+    half_N = round(N_dft/2)
     if half_N == 0:
         return np.array([]), np.array([]), 0
 
@@ -65,16 +76,15 @@ def calculate_dft(df_segment):
     for k in range (half_N):
         MagDFT[k] = np.sqrt(np.square(x_real[k]) + np.square(x_imaj[k]))
     
-
-    
-    xf_positive = np.arange(0, half_N) * fs / N
+    xf_positive = np.arange(0, half_N) * fs / N_dft
     
     
-    yf_positive_magnitude = MagDFT * 2.0 / N
+    yf_positive_magnitude = MagDFT * 2.0 / N_orig
     if half_N > 0:
-        yf_positive_magnitude[0] = MagDFT[0] / N 
+        yf_positive_magnitude[0] = MagDFT[0] / N_orig 
 
     return xf_positive, yf_positive_magnitude, fs
+
 
 st.title("ECG Data DFT Analysis")
 st.subheader("File Upload")
@@ -181,7 +191,7 @@ if uploaded_file is not None:
 
             st.subheader("3. DFT Analysis of Segments")
             
-           
+            
             xf_p, yf_p, fs_p = calculate_dft(st.session_state.p_wave_data)
             xf_qrs, yf_qrs, fs_qrs = calculate_dft(st.session_state.qrs_data)
             xf_t, yf_t, fs_t = calculate_dft(st.session_state.t_wave_data)
@@ -190,17 +200,14 @@ if uploaded_file is not None:
             
             plot_empty = True
 
-     
             if fs_p > 0 and len(xf_p) > 0:
                 ax_dft.plot(xf_p, yf_p, label=f'P Wave (fs={fs_p:.1f} Hz)', color='blue', alpha=0.7)
                 plot_empty = False
             
- 
             if fs_qrs > 0 and len(xf_qrs) > 0:
                 ax_dft.plot(xf_qrs, yf_qrs, label=f'QRS Complex (fs={fs_qrs:.1f} Hz)', color='red', alpha=0.7)
                 plot_empty = False
 
- 
             if fs_t > 0 and len(xf_t) > 0:
                 ax_dft.plot(xf_t, yf_t, label=f'T Wave (fs={fs_t:.1f} Hz)', color='green', alpha=0.7)
                 plot_empty = False
@@ -208,12 +215,10 @@ if uploaded_file is not None:
             if plot_empty:
                 st.write("Not enough data selected in any segment to plot DFT.")
             else:
-                ax_dft.set_title("Combined DFT Analysis of ECG Segments")
+                ax_dft.set_title("Combined DFT Analysis of ECG Segments (Padded to 200 points)")
                 ax_dft.set_xlabel("Frequency (Hz)")
                 ax_dft.set_ylabel("Amplitude")
-               
+                
                 ax_dft.grid(True, which="both", ls="--")
                 ax_dft.legend()
                 st.pyplot(fig_dft, use_container_width=True)
-
-               
