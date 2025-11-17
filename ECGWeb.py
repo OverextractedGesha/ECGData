@@ -205,10 +205,11 @@ if uploaded_file is not None:
             if plot_empty:
                 st.write("Not enough data selected in any segment to plot DFT.")
             else:
-                ax_dft.set_title("Combined DFT Analysis of ECG Segments (Padded to 200 points)")
+                ax_dft.set_title("Combined DFT Analysis of ECG Segments")
                 ax_dft.set_xlabel("Frequency (Hz)")
                 ax_dft.set_ylabel("Amplitude")
                 
                 ax_dft.grid(True, which="both", ls="--")
                 ax_dft.legend()
                 st.pyplot(fig_dft, use_container_width=True)
+
