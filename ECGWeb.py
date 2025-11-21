@@ -24,31 +24,34 @@ def create_full_plot(df):
     ax.legend()
     return fig
 
-
 @st.cache_data
 def calculate_dft(df_segment):
     
+    # 1. Define the target DFT size
     N_dft = 200
 
+    # 2. Get the original signal properties
     original_signal = df_segment['Value'].values
-    time_ms = df_segment['Index'].values
     N_orig = len(original_signal)
 
+    # 3. Check if the original signal is valid
     if N_orig < 2:
         return np.array([]), np.array([]), 0
 
+    # 4. Fixed Sampling Frequency as requested
     fs = 100.0
 
-    
+    # 5. Detrend the original signal
     x_detrended = original_signal - np.mean(original_signal)
     
+    # 6. Create the padded array (200 zeros)
     x_padded = np.zeros(N_dft)
     
+    # 7. Copy original data into padded array
     points_to_copy = min(N_orig, N_dft)
-    
     x_padded[0:points_to_copy] = x_detrended[0:points_to_copy]
     
-    
+    # 8. Perform DFT on the full 200 points
     x_real = np.zeros(N_dft)
     x_imaj = np.zeros(N_dft)
     
@@ -57,6 +60,7 @@ def calculate_dft(df_segment):
             x_real[k] += x_padded[n]*np.cos(2*np.pi*k*n/N_dft)
             x_imaj[k] -= x_padded[n]*np.sin(2*np.pi*k*n/N_dft)
     
+    # 9. Calculate Magnitude
     half_N = round(N_dft/2)
     if half_N == 0:
         return np.array([]), np.array([]), 0
@@ -66,9 +70,10 @@ def calculate_dft(df_segment):
     for k in range (half_N):
         MagDFT[k] = np.sqrt(np.square(x_real[k]) + np.square(x_imaj[k]))
     
+    # 10. Create Frequency Axis
     xf_positive = np.arange(0, half_N) * fs / N_dft
     
-    
+    # 11. Normalize Amplitude (Divide by N_orig to keep correct scale)
     yf_positive_magnitude = MagDFT * 2.0 / N_orig
     if half_N > 0:
         yf_positive_magnitude[0] = MagDFT[0] / N_orig 
@@ -93,10 +98,11 @@ if uploaded_file is not None:
         min_val = int(df['Index'].min())
         max_val = int(df['Index'].max())
 
-        form = st.form(key='ecg_cycle_form')
-        start_index_input = form.number_input('Start Index (ms)', value=min_val, min_value=min_val, max_value=max_val, step=1)
-        end_index_input = form.number_input('End Index (ms)', value=min_val + 500, min_value=min_val, max_value=max_val, step=1)
-        submit_button = form.form_submit_button(label='Analyze Cycle')
+        # --- FIXED FORM SECTION USING 'WITH' SYNTAX ---
+        with st.form(key='ecg_cycle_form'):
+            start_index_input = st.number_input('Start Index (ms)', value=min_val, min_value=min_val, max_value=max_val, step=1)
+            end_index_input = st.number_input('End Index (ms)', value=min_val + 500, min_value=min_val, max_value=max_val, step=1)
+            submit_button = st.form_submit_button(label='Analyze Cycle')
 
         if submit_button:
             start_index = int(start_index_input)
@@ -205,7 +211,7 @@ if uploaded_file is not None:
             if plot_empty:
                 st.write("Not enough data selected in any segment to plot DFT.")
             else:
-                ax_dft.set_title("Combined DFT Analysis of ECG Segments (Padded       to 200 points)")
+                ax_dft.set_title("Combined DFT Analysis of ECG Segments (Padded to 200 points)")
                 ax_dft.set_xlabel("Frequency (Hz)")
                 ax_dft.set_ylabel("Amplitude")
                 
