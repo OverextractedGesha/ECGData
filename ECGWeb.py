@@ -218,3 +218,4 @@ if uploaded_file is not None:
                 ax_dft.grid(True, which="both", ls="--")
                 ax_dft.legend()
                 st.pyplot(fig_dft, use_container_width=True)
+
