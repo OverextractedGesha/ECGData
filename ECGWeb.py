@@ -2,11 +2,12 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import os
 
 @st.cache_data
-def load_data(uploaded_file):
+def load_data(file_path_or_buffer):
     try:
-        df = pd.read_csv(uploaded_file, header=None)
+        df = pd.read_csv(file_path_or_buffer, header=None)
         df.columns = ['Index', 'Value']
         return df
     except Exception as e:
@@ -19,7 +20,7 @@ def create_full_plot(df):
     ax.plot(df['Index'], df['Value'], label='ECG Signal')
     ax.set_title('ECG Signal from Uploaded File')
     ax.set_ylabel('Amplitude (mV)')
-    ax.set_xlabel('Time (ms)')
+    ax.set_xlabel('Time')
     ax.grid(True)
     ax.legend()
     return fig
@@ -85,8 +86,16 @@ st.title("ECG Data DFT Analysis")
 st.subheader("File Upload")
 uploaded_file = st.file_uploader("Choose a csv file", type="csv")
 
+# Logic to determine which file to load
+file_to_load = None
 if uploaded_file is not None:
-    df = load_data(uploaded_file)
+    file_to_load = uploaded_file
+elif os.path.exists("DataHiMe.csv"):
+    file_to_load = "DataHiMe.csv"
+    st.info("Loading default file: DataHiMe.csv")
+
+if file_to_load is not None:
+    df = load_data(file_to_load)
     
     if df is not None:
         st.subheader("ECG Data Preview")
@@ -95,18 +104,35 @@ if uploaded_file is not None:
 
         st.subheader("1. Select a Single ECG Cycle")
         
-        min_val = int(df['Index'].min())
-        max_val = int(df['Index'].max())
+        # --- DYNAMIC RANGE FIX ---
+        # We check the min and max of your data to prevent errors.
+        min_val = float(df['Index'].min())
+        max_val = float(df['Index'].max())
+        
+        # We calculate a safe default "End Index". 
+        # If data is in seconds (max ~60), adding 500 causes a crash.
+        # We add 10% of the file length as a default instead.
+        default_duration = (max_val - min_val) * 0.1
+        if default_duration == 0: default_duration = 1.0
+        
+        default_start = min_val
+        default_end = min(min_val + default_duration, max_val)
+        
+        # Determine a smart "step" size.
+        # If data is 0.008, step=1 is too big.
+        step_size = 1.0
+        if max_val - min_val < 100:
+            step_size = 0.01
 
-        # --- FIXED FORM SECTION USING 'WITH' SYNTAX ---
         with st.form(key='ecg_cycle_form'):
-            start_index_input = st.number_input('Start Index (ms)', value=min_val, min_value=min_val, max_value=max_val, step=1)
-            end_index_input = st.number_input('End Index (ms)', value=min_val + 500, min_value=min_val, max_value=max_val, step=1)
+            # Use 'format' to ensure decimals are shown if needed
+            start_index_input = st.number_input('Start Time', value=default_start, min_value=min_val, max_value=max_val, step=step_size, format="%.3f")
+            end_index_input = st.number_input('End Time', value=default_end, min_value=min_val, max_value=max_val, step=step_size, format="%.3f")
             submit_button = st.form_submit_button(label='Analyze Cycle')
 
         if submit_button:
-            start_index = int(start_index_input)
-            end_index = int(end_index_input)
+            start_index = float(start_index_input)
+            end_index = float(end_index_input)
 
             if start_index >= end_index:
                 st.error("Error: Start Index must be less than End Index.")
@@ -132,25 +158,29 @@ if uploaded_file is not None:
             st.write("Use the sliders to highlight the different parts of the ECG cycle.")
             cycle_duration = end_index - start_index
             
+            # Sliders also need to handle float values now
             p_wave_range = st.slider(
                 "Select P Wave Range",
                 min_value=start_index,
                 max_value=end_index,
-                value=(start_index, start_index + int(cycle_duration * 0.15)) 
+                value=(start_index, start_index + (cycle_duration * 0.15)),
+                step=step_size/2
             )
             
             qrs_complex_range = st.slider(
                 "Select QRS Complex Range",
                 min_value=start_index,
                 max_value=end_index,
-                value=(start_index + int(cycle_duration * 0.2), start_index + int(cycle_duration * 0.4))
+                value=(start_index + (cycle_duration * 0.2), start_index + (cycle_duration * 0.4)),
+                step=step_size/2
             )
             
             t_wave_range = st.slider(
                 "Select T Wave Range",
                 min_value=start_index,
                 max_value=end_index,
-                value=(start_index + int(cycle_duration * 0.5), start_index + int(cycle_duration * 0.8))
+                value=(start_index + (cycle_duration * 0.5), start_index + (cycle_duration * 0.8)),
+                step=step_size/2
             )
 
             st.subheader("Highlighted ECG Cycle")
@@ -159,17 +189,17 @@ if uploaded_file is not None:
             ax_highlight.plot(df_cycle['Index'], df_cycle['Value'], label='Single ECG Cycle', color='black', zorder=10)
 
             ax_highlight.axvspan(p_wave_range[0], p_wave_range[1], color='blue', alpha=0.3, 
-                                 label=f'P Wave ({p_wave_range[1]-p_wave_range[0]} ms)')
+                                 label=f'P Wave ({p_wave_range[1]-p_wave_range[0]:.3f} s)')
             
             ax_highlight.axvspan(qrs_complex_range[0], qrs_complex_range[1], color='red', alpha=0.3, 
-                                 label=f'QRS ({qrs_complex_range[1]-qrs_complex_range[0]} ms)')
+                                 label=f'QRS ({qrs_complex_range[1]-qrs_complex_range[0]:.3f} s)')
             
             ax_highlight.axvspan(t_wave_range[0], t_wave_range[1], color='green', alpha=0.3, 
-                                 label=f'T Wave ({t_wave_range[1]-t_wave_range[0]} ms)')
+                                 label=f'T Wave ({t_wave_range[1]-t_wave_range[0]:.3f} s)')
             
             ax_highlight.set_title('Highlighted ECG Complexes')
             ax_highlight.set_ylabel('Amplitude (mV)')
-            ax_highlight.set_xlabel('Time (ms)')
+            ax_highlight.set_xlabel('Time')
             ax_highlight.set_xlim(start_index, end_index) 
             ax_highlight.grid(True)
             ax_highlight.legend()
@@ -181,9 +211,9 @@ if uploaded_file is not None:
             st.session_state.t_wave_data = df_cycle[(df_cycle['Index'] >= t_wave_range[0]) & (df_cycle['Index'] <= t_wave_range[1])]
 
             st.write("---")
-            st.write(f"**P Wave Duration:** {p_wave_range[1]-p_wave_range[0]} ms")
-            st.write(f"**QRS Complex Duration:** {qrs_complex_range[1]-qrs_complex_range[0]} ms")
-            st.write(f"**T Wave Duration:** {t_wave_range[1]-t_wave_range[0]} ms")
+            st.write(f"**P Wave Duration:** {p_wave_range[1]-p_wave_range[0]:.3f} s")
+            st.write(f"**QRS Complex Duration:** {qrs_complex_range[1]-qrs_complex_range[0]:.3f} s")
+            st.write(f"**T Wave Duration:** {t_wave_range[1]-t_wave_range[0]:.3f} s")
 
             st.subheader("3. DFT Analysis of Segments")
             
@@ -218,4 +248,3 @@ if uploaded_file is not None:
                 ax_dft.grid(True, which="both", ls="--")
                 ax_dft.legend()
                 st.pyplot(fig_dft, use_container_width=True)
-
