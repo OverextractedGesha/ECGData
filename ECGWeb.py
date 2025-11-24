@@ -14,14 +14,20 @@ def load_data(file_path_or_buffer):
         st.error(f"Error reading CSV file: {e}")
         return None
 
+# --- MODIFIED: Added x_range parameter for zooming ---
 @st.cache_data
-def create_full_plot(df):
+def create_full_plot(df, x_range=None):
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.plot(df['Index'], df['Value'], label='ECG Signal')
     ax.set_title('ECG Signal from Uploaded File')
     ax.set_ylabel('Amplitude (mV)')
     ax.set_xlabel('Time')
     ax.grid(True)
+    
+    # Apply zoom if a range is provided
+    if x_range:
+        ax.set_xlim(x_range)
+        
     ax.legend()
     return fig
 
@@ -99,19 +105,32 @@ if file_to_load is not None:
     
     if df is not None:
         st.subheader("ECG Data Preview")
-        fig_full = create_full_plot(df) 
+        
+        # --- ADDED ZOOM FEATURE ---
+        min_time = float(df['Index'].min())
+        max_time = float(df['Index'].max())
+        
+        # Create a layout for the zoom controls
+        col1, col2 = st.columns([3, 1])
+        with col1:
+             zoom_range = st.slider(
+                "Zoom (Time Range)",
+                min_value=min_time,
+                max_value=max_time,
+                value=(min_time, max_time)
+            )
+        
+        # Pass the zoom range to the plot function
+        fig_full = create_full_plot(df, zoom_range) 
         st.pyplot(fig_full)
 
         st.subheader("1. Select a Single ECG Cycle")
         
         # --- DYNAMIC RANGE FIX ---
-        # We check the min and max of your data to prevent errors.
-        min_val = float(df['Index'].min())
-        max_val = float(df['Index'].max())
+        min_val = min_time # Reuse calculated min
+        max_val = max_time # Reuse calculated max
         
         # We calculate a safe default "End Index". 
-        # If data is in seconds (max ~60), adding 500 causes a crash.
-        # We add 10% of the file length as a default instead.
         default_duration = (max_val - min_val) * 0.1
         if default_duration == 0: default_duration = 1.0
         
@@ -119,13 +138,11 @@ if file_to_load is not None:
         default_end = min(min_val + default_duration, max_val)
         
         # Determine a smart "step" size.
-        # If data is 0.008, step=1 is too big.
         step_size = 1.0
         if max_val - min_val < 100:
             step_size = 0.01
 
         with st.form(key='ecg_cycle_form'):
-            # Use 'format' to ensure decimals are shown if needed
             start_index_input = st.number_input('Start Time', value=default_start, min_value=min_val, max_value=max_val, step=step_size, format="%.3f")
             end_index_input = st.number_input('End Time', value=default_end, min_value=min_val, max_value=max_val, step=step_size, format="%.3f")
             submit_button = st.form_submit_button(label='Analyze Cycle')
@@ -158,7 +175,6 @@ if file_to_load is not None:
             st.write("Use the sliders to highlight the different parts of the ECG cycle.")
             cycle_duration = end_index - start_index
             
-            # Sliders also need to handle float values now
             p_wave_range = st.slider(
                 "Select P Wave Range",
                 min_value=start_index,
