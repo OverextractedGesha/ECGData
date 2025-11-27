@@ -4,6 +4,14 @@ import pandas as pd
 import numpy as np
 import os
 
+# --- FILTERING FUNCTIONS ---
+def apply_mav(data, window_size):
+    # Simple Moving Average using convolution
+    window = np.ones(window_size) / window_size
+    # mode='same' returns output of length max(M, N) - boundary effects are visible at edges
+    y = np.convolve(data, window, mode='same')
+    return y
+
 @st.cache_data
 def load_data(file_path_or_buffer):
     try:
@@ -16,13 +24,20 @@ def load_data(file_path_or_buffer):
 
 # --- MODIFIED: Added x_range parameter for zooming ---
 @st.cache_data
-def create_full_plot(df, x_range=None):
+def create_full_plot(df, x_range=None, raw_df=None):
     fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(df['Index'], df['Value'], label='ECG Signal')
-    ax.set_title('ECG Signal from Uploaded File')
+    
+    # Plot Raw data faintly if filtered data exists
+    if raw_df is not None:
+        ax.plot(raw_df['Index'], raw_df['Value'], label='Raw Signal', color='lightgray', alpha=0.7, linewidth=1)
+        ax.plot(df['Index'], df['Value'], label='Filtered Signal', color='#1f77b4', linewidth=1.2)
+    else:
+        ax.plot(df['Index'], df['Value'], label='ECG Signal')
+        
+    ax.set_title('ECG Signal')
     ax.set_ylabel('Amplitude (mV)')
     ax.set_xlabel('Time')
-    ax.grid(True)
+    ax.grid(True, alpha=0.3)
     
     # Apply zoom if a range is provided
     if x_range:
@@ -32,7 +47,7 @@ def create_full_plot(df, x_range=None):
     return fig
 
 @st.cache_data
-def calculate_dft(df_segment):
+def calculate_dft(df_segment, fs):
     
     # 1. Define the target DFT size
     N_dft = 200
@@ -45,20 +60,17 @@ def calculate_dft(df_segment):
     if N_orig < 2:
         return np.array([]), np.array([]), 0
 
-    # 4. Fixed Sampling Frequency as requested
-    fs = 100.0
-
-    # 5. Detrend the original signal
+    # 4. Detrend the original signal
     x_detrended = original_signal - np.mean(original_signal)
     
-    # 6. Create the padded array (200 zeros)
+    # 5. Create the padded array (200 zeros)
     x_padded = np.zeros(N_dft)
     
-    # 7. Copy original data into padded array
+    # 6. Copy original data into padded array
     points_to_copy = min(N_orig, N_dft)
     x_padded[0:points_to_copy] = x_detrended[0:points_to_copy]
     
-    # 8. Perform DFT on the full 200 points
+    # 7. Perform DFT on the full 200 points
     x_real = np.zeros(N_dft)
     x_imaj = np.zeros(N_dft)
     
@@ -67,7 +79,7 @@ def calculate_dft(df_segment):
             x_real[k] += x_padded[n]*np.cos(2*np.pi*k*n/N_dft)
             x_imaj[k] -= x_padded[n]*np.sin(2*np.pi*k*n/N_dft)
     
-    # 9. Calculate Magnitude
+    # 8. Calculate Magnitude
     half_N = round(N_dft/2)
     if half_N == 0:
         return np.array([]), np.array([]), 0
@@ -77,10 +89,10 @@ def calculate_dft(df_segment):
     for k in range (half_N):
         MagDFT[k] = np.sqrt(np.square(x_real[k]) + np.square(x_imaj[k]))
     
-    # 10. Create Frequency Axis
+    # 9. Create Frequency Axis
     xf_positive = np.arange(0, half_N) * fs / N_dft
     
-    # 11. Normalize Amplitude (Divide by N_orig to keep correct scale)
+    # 10. Normalize Amplitude (Divide by N_orig to keep correct scale)
     yf_positive_magnitude = MagDFT * 2.0 / N_orig
     if half_N > 0:
         yf_positive_magnitude[0] = MagDFT[0] / N_orig 
@@ -89,8 +101,10 @@ def calculate_dft(df_segment):
 
 
 st.title("ECG Data DFT Analysis")
-st.subheader("File Upload")
-uploaded_file = st.file_uploader("Choose a csv file", type="csv")
+
+# --- SIDEBAR CONFIGURATION ---
+st.sidebar.header("Configuration")
+uploaded_file = st.sidebar.file_uploader("Choose a csv file", type="csv")
 
 # Logic to determine which file to load
 file_to_load = None
@@ -98,17 +112,55 @@ if uploaded_file is not None:
     file_to_load = uploaded_file
 elif os.path.exists("DataHiMe.csv"):
     file_to_load = "DataHiMe.csv"
-    st.info("Loading default file: DataHiMe.csv")
+    st.sidebar.info("Using default: DataHiMe.csv")
 
 if file_to_load is not None:
     df = load_data(file_to_load)
     
     if df is not None:
+        
+        # --- CALCULATE SAMPLING RATE ---
+        # Robustly calculate fs from the time index
+        try:
+            time_diffs = np.diff(df['Index'])
+            fs_est = 1.0 / np.median(time_diffs)
+        except:
+            fs_est = 100.0 # Fallback
+        
+        st.sidebar.write(f"**Detected Sampling Rate:** {fs_est:.1f} Hz")
+
+        # --- FILTERING CONTROLS ---
+        st.sidebar.subheader("Noise Filtering")
+        
+        # Explicit MAV Filter Controls
+        apply_mav_filter = st.sidebar.checkbox("Apply Moving Average (MAV)", value=True)
+        
+        df_processed = df.copy() # Working copy
+        raw_df_for_plot = None   # For visualization comparison
+
+        if apply_mav_filter:
+            window_size = st.sidebar.slider(
+                "Window Size (Points)", 
+                min_value=3, 
+                max_value=50, 
+                value=5, 
+                help="Higher values smooth more but may reduce peak heights (QRS)."
+            )
+            
+            try:
+                filtered_signal = apply_mav(df['Value'], window_size)
+                df_processed['Value'] = filtered_signal
+                raw_df_for_plot = df # Save original for comparison plot
+                st.sidebar.success(f"MAV (N={window_size}) Active")
+            except Exception as e:
+                st.sidebar.error(f"Filter Error: {e}")
+
+        # --- MAIN PREVIEW ---
         st.subheader("ECG Data Preview")
         
         # --- ADDED ZOOM FEATURE ---
-        min_time = float(df['Index'].min())
-        max_time = float(df['Index'].max())
+        min_time = float(df_processed['Index'].min())
+        max_time = float(df_processed['Index'].max())
         
         # Create a layout for the zoom controls
         col1, col2 = st.columns([3, 1])
@@ -121,26 +173,23 @@ if file_to_load is not None:
             )
         
         # Pass the zoom range to the plot function
-        fig_full = create_full_plot(df, zoom_range) 
+        # We pass df_processed (which might be filtered) and optional raw_df for comparison
+        fig_full = create_full_plot(df_processed, zoom_range, raw_df=raw_df_for_plot) 
         st.pyplot(fig_full)
 
         st.subheader("1. Select a Single ECG Cycle")
         
         # --- DYNAMIC RANGE FIX ---
-        min_val = min_time # Reuse calculated min
-        max_val = max_time # Reuse calculated max
+        min_val = min_time 
+        max_val = max_time 
         
-        # We calculate a safe default "End Index". 
         default_duration = (max_val - min_val) * 0.1
         if default_duration == 0: default_duration = 1.0
         
         default_start = min_val
         default_end = min(min_val + default_duration, max_val)
         
-        # Determine a smart "step" size.
-        step_size = 1.0
-        if max_val - min_val < 100:
-            step_size = 0.01
+        step_size = 0.01 if (max_val - min_val) < 100 else 1.0
 
         with st.form(key='ecg_cycle_form'):
             start_index_input = st.number_input('Start Time', value=default_start, min_value=min_val, max_value=max_val, step=step_size, format="%.3f")
@@ -155,7 +204,7 @@ if file_to_load is not None:
                 st.error("Error: Start Index must be less than End Index.")
                 st.session_state.cycle_selected = False
             else:
-                df_cycle_check = df[(df['Index'] >= start_index) & (df['Index'] <= end_index)]
+                df_cycle_check = df_processed[(df_processed['Index'] >= start_index) & (df_processed['Index'] <= end_index)]
                 if len(df_cycle_check) < 3: 
                     st.error("Error: Not enough data points selected. Please choose a wider range.")
                     st.session_state.cycle_selected = False
@@ -169,7 +218,8 @@ if file_to_load is not None:
             start_index = st.session_state.start_index
             end_index = st.session_state.end_index
             
-            df_cycle = df[(df['Index'] >= start_index) & (df['Index'] <= end_index)].copy()
+            # Use processed (potentially filtered) data here
+            df_cycle = df_processed[(df_processed['Index'] >= start_index) & (df_processed['Index'] <= end_index)].copy()
 
             st.subheader("2. Identify P, QRS, and T Complexes")
             st.write("Use the sliders to highlight the different parts of the ECG cycle.")
@@ -233,10 +283,10 @@ if file_to_load is not None:
 
             st.subheader("3. DFT Analysis of Segments")
             
-            
-            xf_p, yf_p, fs_p = calculate_dft(st.session_state.p_wave_data)
-            xf_qrs, yf_qrs, fs_qrs = calculate_dft(st.session_state.qrs_data)
-            xf_t, yf_t, fs_t = calculate_dft(st.session_state.t_wave_data)
+            # Pass estimated fs to DFT function
+            xf_p, yf_p, fs_p = calculate_dft(st.session_state.p_wave_data, fs_est)
+            xf_qrs, yf_qrs, fs_qrs = calculate_dft(st.session_state.qrs_data, fs_est)
+            xf_t, yf_t, fs_t = calculate_dft(st.session_state.t_wave_data, fs_est)
 
             fig_dft, ax_dft = plt.subplots(figsize=(10, 6))
             
