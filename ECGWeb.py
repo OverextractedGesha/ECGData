@@ -3,20 +3,68 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import os
-from scipy.signal import butter, filtfilt
 
-# --- FILTERING FUNCTIONS ---
-def butter_bandpass(lowcut, highcut, fs, order=5):
-    nyq = 0.5 * fs
-    low = lowcut / nyq
-    high = highcut / nyq
-    b, a = butter(order, [low, high], btype='band')
-    return b, a
+# --- MANUALLY CODED FILTER FUNCTIONS (No Scipy) ---
 
-def apply_bandpass(data, lowcut, highcut, fs, order=5):
-    b, a = butter_bandpass(lowcut, highcut, fs, order=order)
-    y = filtfilt(b, a, data)
+def manual_iir_lowpass(data, cutoff, fs):
+    """
+    Implements a simple First-Order IIR Low Pass Filter manually.
+    Formula: y[i] = alpha * x[i] + (1 - alpha) * y[i-1]
+    where alpha = dt / (RC + dt)
+    """
+    dt = 1.0 / fs
+    rc = 1.0 / (2 * np.pi * cutoff)
+    alpha = dt / (rc + dt)
+    
+    n = len(data)
+    y = np.zeros(n)
+    y[0] = data[0]
+    
+    for i in range(1, n):
+        y[i] = alpha * data[i] + (1 - alpha) * y[i-1]
     return y
+
+def manual_iir_highpass(data, cutoff, fs):
+    """
+    Implements a simple First-Order IIR High Pass Filter manually.
+    Formula: y[i] = alpha * (y[i-1] + x[i] - x[i-1])
+    where alpha = RC / (RC + dt)
+    """
+    dt = 1.0 / fs
+    rc = 1.0 / (2 * np.pi * cutoff)
+    alpha = rc / (rc + dt)
+    
+    n = len(data)
+    y = np.zeros(n)
+    y[0] = 0 # Start at 0 for high pass
+    
+    for i in range(1, n):
+        y[i] = alpha * (y[i-1] + data[i] - data[i-1])
+    return y
+
+def apply_manual_bandpass(data_series, low_cut, high_cut, fs):
+    """
+    Combines High Pass and Low Pass filters to create a Bandpass effect.
+    Applies filters forward and backward to cancel phase shift (Zero-Phase).
+    """
+    # Convert pandas Series to numpy array for speed
+    data = data_series.values
+    
+    # 1. Apply High Pass (Remove Baseline Wander)
+    # Forward pass
+    hp_fwd = manual_iir_highpass(data, low_cut, fs)
+    # Backward pass (reverse data, filter, reverse back)
+    hp_bwd = manual_iir_highpass(hp_fwd[::-1], low_cut, fs)
+    hp_final = hp_bwd[::-1]
+    
+    # 2. Apply Low Pass (Remove High Freq Noise)
+    # Forward pass
+    lp_fwd = manual_iir_lowpass(hp_final, high_cut, fs)
+    # Backward pass
+    lp_bwd = manual_iir_lowpass(lp_fwd[::-1], high_cut, fs)
+    final_output = lp_bwd[::-1]
+    
+    return final_output
 
 @st.cache_data
 def load_data(file_path_or_buffer):
@@ -138,30 +186,30 @@ if file_to_load is not None:
         # --- FILTERING CONTROLS ---
         st.sidebar.subheader("Noise Filtering")
         
-        # Bandpass Filter Controls (Butterworth)
-        apply_filter = st.sidebar.checkbox("Apply Bandpass Filter", value=True)
+        # Bandpass Filter Controls (Manual IIR)
+        apply_filter = st.sidebar.checkbox("Apply Manual Bandpass Filter", value=True)
         
         df_processed = df.copy() # Working copy
         raw_df_for_plot = None   # For visualization comparison
 
         if apply_filter:
             # Typical ECG Bandpass range: 0.5Hz to 40Hz
-            st.sidebar.write("Butterworth Filter Settings:")
-            low_cut = st.sidebar.slider("Low Cutoff (Hz)", 0.1, 5.0, 0.5, 0.1, help="Removes baseline wander")
+            st.sidebar.write("**Manual IIR Filter Settings:**")
+            low_cut = st.sidebar.slider("Low Cutoff (Hz)", 0.1, 5.0, 0.5, 0.1, help="High Pass: Removes baseline wander")
             # Limit high cut to Nyquist frequency
             max_freq = float(fs_est / 2.0) - 1.0
             default_high = 40.0 if max_freq > 40.0 else max_freq
             
-            high_cut = st.sidebar.slider("High Cutoff (Hz)", 10.0, max_freq, default_high, 1.0, help="Removes high freq noise")
+            high_cut = st.sidebar.slider("High Cutoff (Hz)", 10.0, max_freq, default_high, 1.0, help="Low Pass: Removes high freq noise")
             
             try:
                 if low_cut >= high_cut:
                      st.sidebar.error("Low cutoff must be lower than High cutoff.")
                 else:
-                    filtered_signal = apply_bandpass(df['Value'], low_cut, high_cut, fs_est)
+                    filtered_signal = apply_manual_bandpass(df['Value'], low_cut, high_cut, fs_est)
                     df_processed['Value'] = filtered_signal
                     raw_df_for_plot = df # Save original for comparison plot
-                    st.sidebar.success(f"Bandpass ({low_cut}-{high_cut} Hz) Active")
+                    st.sidebar.success(f"Filter Active ({low_cut}-{high_cut} Hz)")
             except Exception as e:
                 st.sidebar.error(f"Filter Error: {e}")
 
