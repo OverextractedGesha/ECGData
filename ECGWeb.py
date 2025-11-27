@@ -4,110 +4,33 @@ import pandas as pd
 import numpy as np
 import os
 
-# --- HELPER: Auto-Calculate Bandwidth ---
-def calculate_optimal_bandwidth(data, fs):
+# --- HELPER: Frequency Domain Filter (Brick-wall) ---
+def fft_brickwall_filter(data_segment, fs, low_cut, high_cut):
     """
-    Calculates optimal filter parameters based on signal power.
-    1. Low Cut: Defaults to 0.5 Hz (Standard for baseline removal).
-    2. High Cut: Finds the frequency containing 95% of signal energy.
+    Applies a Brick-wall filter in the Frequency Domain.
+    1. Compute FFT of the segment.
+    2. Zero out coefficients outside [low_cut, high_cut].
+    3. Compute Inverse FFT to recover time-domain signal.
     """
-    # Remove DC component
-    data_no_dc = data - np.mean(data)
+    n = len(data_segment)
+    if n == 0: return data_segment
     
-    # Compute FFT
-    fft_vals = np.fft.rfft(data_no_dc)
-    frequencies = np.fft.rfftfreq(len(data_no_dc), d=1.0/fs)
-    power_spectrum = np.abs(fft_vals)**2
+    # 1. FFT
+    fft_coeffs = np.fft.fft(data_segment)
+    frequencies = np.fft.fftfreq(n, d=1/fs)
     
-    # We focus on the range > 0.1 Hz to ignore DC/Very low freq
-    valid_mask = frequencies > 0.1
-    valid_freqs = frequencies[valid_mask]
-    valid_power = power_spectrum[valid_mask]
+    # 2. Create Mask (Keep frequencies within range)
+    # We must keep both positive and negative frequencies for real signal reconstruction
+    mask = (np.abs(frequencies) >= low_cut) & (np.abs(frequencies) <= high_cut)
     
-    if len(valid_power) == 0:
-        return 0.5, 40.0 # Fallback
+    # Apply mask
+    fft_filtered = fft_coeffs * mask
     
-    # Cumulative Power Calculation
-    total_power = np.sum(valid_power)
-    cumulative_power = np.cumsum(valid_power)
+    # 3. Inverse FFT
+    filtered_signal = np.fft.ifft(fft_filtered)
     
-    # Find frequency where 95% of power is contained
-    target_power = 0.95 * total_power
-    idx_95 = np.searchsorted(cumulative_power, target_power)
-    
-    if idx_95 < len(valid_freqs):
-        optimal_high = valid_freqs[idx_95]
-    else:
-        optimal_high = 40.0
-        
-    # Safety Clamps for ECG
-    # QRS complex needs at least ~15-20Hz to keep shape.
-    # 50/60Hz is mains noise, so we usually want to stay below that.
-    optimal_high = max(15.0, min(optimal_high, 45.0))
-    
-    return 0.5, optimal_high
-
-# --- MANUALLY CODED FILTER FUNCTIONS (No Scipy) ---
-
-def manual_iir_lowpass(data, cutoff, fs):
-    """
-    Implements a simple First-Order IIR Low Pass Filter manually.
-    Formula: y[i] = alpha * x[i] + (1 - alpha) * y[i-1]
-    where alpha = dt / (RC + dt)
-    """
-    dt = 1.0 / fs
-    rc = 1.0 / (2 * np.pi * cutoff)
-    alpha = dt / (rc + dt)
-    
-    n = len(data)
-    y = np.zeros(n)
-    y[0] = data[0]
-    
-    for i in range(1, n):
-        y[i] = alpha * data[i] + (1 - alpha) * y[i-1]
-    return y
-
-def manual_iir_highpass(data, cutoff, fs):
-    """
-    Implements a simple First-Order IIR High Pass Filter manually.
-    Formula: y[i] = alpha * (y[i-1] + x[i] - x[i-1])
-    where alpha = RC / (RC + dt)
-    """
-    dt = 1.0 / fs
-    rc = 1.0 / (2 * np.pi * cutoff)
-    alpha = rc / (rc + dt)
-    
-    n = len(data)
-    y = np.zeros(n)
-    y[0] = 0 # Start at 0 for high pass
-    
-    for i in range(1, n):
-        y[i] = alpha * (y[i-1] + data[i] - data[i-1])
-    return y
-
-def apply_manual_bandpass(data_series, low_cut, high_cut, fs):
-    """
-    Combines High Pass and Low Pass filters to create a Bandpass effect.
-    Applies filters forward and backward to cancel phase shift (Zero-Phase).
-    """
-    # Convert pandas Series to numpy array for speed
-    data = data_series.values
-    
-    # 1. Apply High Pass (Remove Baseline Wander)
-    # Forward pass
-    hp_fwd = manual_iir_highpass(data, low_cut, fs)
-    # Backward pass (reverse data, filter, reverse back)
-    hp_bwd = manual_iir_highpass(hp_fwd[::-1], low_cut, fs)
-    hp_final = hp_bwd[::-1]
-    
-    # 2. Apply Low Pass (Remove High Freq Noise)
-    # Forward pass
-    lp_fwd = manual_iir_lowpass(hp_final, high_cut, fs)
-    # Backward pass
-    lp_bwd = manual_iir_lowpass(lp_fwd[::-1], high_cut, fs)
-    final_output = lp_bwd[::-1]
-    
-    return final_output
+    # Return real part (imaginary part should be near zero due to symmetry)
+    return np.real(filtered_signal)
 
 @st.cache_data
 def load_data(file_path_or_buffer):
@@ -119,33 +42,26 @@ def load_data(file_path_or_buffer):
         st.error(f"Error reading CSV file: {e}")
         return None
 
-# --- MODIFIED: Added x_range parameter for zooming ---
 @st.cache_data
-def create_full_plot(df, x_range=None, raw_df=None):
+def create_full_plot(df, x_range=None):
     fig, ax = plt.subplots(figsize=(10, 6))
     
-    # Plot Raw data faintly if filtered data exists
-    if raw_df is not None:
-        ax.plot(raw_df['Index'], raw_df['Value'], label='Raw Signal', color='lightgray', alpha=0.7, linewidth=1)
-        ax.plot(df['Index'], df['Value'], label='Filtered Signal', color='#1f77b4', linewidth=1.2)
-    else:
-        ax.plot(df['Index'], df['Value'], label='ECG Signal')
+    ax.plot(df['Index'], df['Value'], label='Raw Signal', color='#1f77b4', linewidth=1)
         
-    ax.set_title('ECG Signal')
+    ax.set_title('Raw ECG Signal')
     ax.set_ylabel('Amplitude (mV)')
     ax.set_xlabel('Time')
     ax.grid(True, alpha=0.3)
     
-    # Apply zoom if a range is provided
     if x_range:
         ax.set_xlim(x_range)
         
     ax.legend()
     return fig
 
+# --- YOUR ORIGINAL MANUAL DFT FOR PLOTTING ---
 @st.cache_data
 def calculate_dft(df_segment, fs):
-    
     # 1. Define the target DFT size
     N_dft = 200
 
@@ -153,21 +69,14 @@ def calculate_dft(df_segment, fs):
     original_signal = df_segment['Value'].values
     N_orig = len(original_signal)
 
-    # 3. Check if the original signal is valid
     if N_orig < 2:
         return np.array([]), np.array([]), 0
 
-    # 4. Detrend the original signal
     x_detrended = original_signal - np.mean(original_signal)
-    
-    # 5. Create the padded array (200 zeros)
     x_padded = np.zeros(N_dft)
-    
-    # 6. Copy original data into padded array
     points_to_copy = min(N_orig, N_dft)
     x_padded[0:points_to_copy] = x_detrended[0:points_to_copy]
     
-    # 7. Perform DFT on the full 200 points
     x_real = np.zeros(N_dft)
     x_imaj = np.zeros(N_dft)
     
@@ -176,34 +85,26 @@ def calculate_dft(df_segment, fs):
             x_real[k] += x_padded[n]*np.cos(2*np.pi*k*n/N_dft)
             x_imaj[k] -= x_padded[n]*np.sin(2*np.pi*k*n/N_dft)
     
-    # 8. Calculate Magnitude
     half_N = round(N_dft/2)
-    if half_N == 0:
-        return np.array([]), np.array([]), 0
-
     MagDFT = np.zeros(half_N)
 
     for k in range (half_N):
         MagDFT[k] = np.sqrt(np.square(x_real[k]) + np.square(x_imaj[k]))
     
-    # 9. Create Frequency Axis
     xf_positive = np.arange(0, half_N) * fs / N_dft
-    
-    # 10. Normalize Amplitude (Divide by N_orig to keep correct scale)
     yf_positive_magnitude = MagDFT * 2.0 / N_orig
     if half_N > 0:
         yf_positive_magnitude[0] = MagDFT[0] / N_orig 
 
     return xf_positive, yf_positive_magnitude, fs
 
-
-st.title("ECG Data DFT Analysis")
+# --- MAIN APP ---
+st.title("ECG Analysis: Segment-Based DFT Filtering")
 
 # --- SIDEBAR CONFIGURATION ---
 st.sidebar.header("Configuration")
 uploaded_file = st.sidebar.file_uploader("Choose a csv file", type="csv")
 
-# Logic to determine which file to load
 file_to_load = None
 if uploaded_file is not None:
     file_to_load = uploaded_file
@@ -217,70 +118,24 @@ if file_to_load is not None:
     if df is not None:
         
         # --- CALCULATE SAMPLING RATE ---
-        # Robustly calculate fs from the time index
         try:
             time_diffs = np.diff(df['Index'])
             fs_est = 1.0 / np.median(time_diffs)
         except:
-            fs_est = 100.0 # Fallback
+            fs_est = 100.0
         
         st.sidebar.write(f"**Detected Sampling Rate:** {fs_est:.1f} Hz")
-
-        # --- FILTERING CONTROLS ---
-        st.sidebar.subheader("Noise Filtering")
         
-        # Bandpass Filter Controls (Manual IIR)
-        apply_filter = st.sidebar.checkbox("Apply Manual Bandpass Filter", value=True)
-        
-        df_processed = df.copy() # Working copy
-        raw_df_for_plot = None   # For visualization comparison
-
-        if apply_filter:
-            # Initialize Session State for Filter Values if not present
-            if "filter_low" not in st.session_state:
-                st.session_state.filter_low = 0.5
-            if "filter_high" not in st.session_state:
-                st.session_state.filter_high = 40.0
-                
-            # Define Auto-Calculate Callback
-            def auto_calc_callback():
-                rec_l, rec_h = calculate_optimal_bandwidth(df['Value'].values, fs_est)
-                st.session_state.filter_low = rec_l
-                st.session_state.filter_high = rec_h
-                # Show a toast notification
-                st.toast(f"Set parameters: {rec_l:.1f} - {rec_h:.1f} Hz based on 95% Power Bandwidth")
-
-            st.sidebar.button("Auto-Calculate Optimal Bandwidth", on_click=auto_calc_callback, help="Calculates 95% Power Bandwidth to remove noise while keeping signal.")
-
-            # Typical ECG Bandpass range: 0.5Hz to 40Hz
-            st.sidebar.write("**Manual IIR Filter Settings:**")
-            
-            low_cut = st.sidebar.slider("Low Cutoff (Hz)", 0.1, 5.0, key="filter_low", step=0.1, help="High Pass: Removes baseline wander")
-            
-            # Limit high cut to Nyquist frequency
-            max_freq = float(fs_est / 2.0) - 1.0
-            
-            high_cut = st.sidebar.slider("High Cutoff (Hz)", 10.0, max_freq, key="filter_high", step=1.0, help="Low Pass: Removes high freq noise")
-            
-            try:
-                if low_cut >= high_cut:
-                     st.sidebar.error("Low cutoff must be lower than High cutoff.")
-                else:
-                    filtered_signal = apply_manual_bandpass(df['Value'], low_cut, high_cut, fs_est)
-                    df_processed['Value'] = filtered_signal
-                    raw_df_for_plot = df # Save original for comparison plot
-                    st.sidebar.success(f"Filter Active ({low_cut}-{high_cut} Hz)")
-            except Exception as e:
-                st.sidebar.error(f"Filter Error: {e}")
+        # --- NO GLOBAL FILTERING ---
+        # We now work with Raw data and filter specific segments later
+        df_processed = df.copy()
 
         # --- MAIN PREVIEW ---
-        st.subheader("ECG Data Preview")
+        st.subheader("1. Raw ECG Data Preview")
         
-        # --- ADDED ZOOM FEATURE ---
         min_time = float(df_processed['Index'].min())
         max_time = float(df_processed['Index'].max())
         
-        # Create a layout for the zoom controls
         col1, col2 = st.columns([3, 1])
         with col1:
              zoom_range = st.slider(
@@ -290,28 +145,23 @@ if file_to_load is not None:
                 value=(min_time, max_time)
             )
         
-        # Pass the zoom range to the plot function
-        # We pass df_processed (which might be filtered) and optional raw_df for comparison
-        fig_full = create_full_plot(df_processed, zoom_range, raw_df=raw_df_for_plot) 
+        fig_full = create_full_plot(df_processed, zoom_range) 
         st.pyplot(fig_full)
 
-        st.subheader("1. Select a Single ECG Cycle")
+        st.subheader("2. Select a Single ECG Cycle")
         
-        # --- DYNAMIC RANGE FIX ---
-        min_val = min_time 
-        max_val = max_time 
-        
-        default_duration = (max_val - min_val) * 0.1
+        default_duration = (max_time - min_time) * 0.1
         if default_duration == 0: default_duration = 1.0
-        
-        default_start = min_val
-        default_end = min(min_val + default_duration, max_val)
-        
-        step_size = 0.01 if (max_val - min_val) < 100 else 1.0
+        default_start = min_time
+        default_end = min(min_time + default_duration, max_time)
+        step_size = 0.01
 
         with st.form(key='ecg_cycle_form'):
-            start_index_input = st.number_input('Start Time', value=default_start, min_value=min_val, max_value=max_val, step=step_size, format="%.3f")
-            end_index_input = st.number_input('End Time', value=default_end, min_value=min_val, max_value=max_val, step=step_size, format="%.3f")
+            c1, c2 = st.columns(2)
+            with c1:
+                start_index_input = st.number_input('Start Time', value=default_start, min_value=min_time, max_value=max_time, step=step_size, format="%.3f")
+            with c2:
+                end_index_input = st.number_input('End Time', value=default_end, min_value=min_time, max_value=max_time, step=step_size, format="%.3f")
             submit_button = st.form_submit_button(label='Analyze Cycle')
 
         if submit_button:
@@ -324,7 +174,7 @@ if file_to_load is not None:
             else:
                 df_cycle_check = df_processed[(df_processed['Index'] >= start_index) & (df_processed['Index'] <= end_index)]
                 if len(df_cycle_check) < 3: 
-                    st.error("Error: Not enough data points selected. Please choose a wider range.")
+                    st.error("Error: Not enough data points selected.")
                     st.session_state.cycle_selected = False
                 else:
                     st.session_state.cycle_selected = True
@@ -336,99 +186,98 @@ if file_to_load is not None:
             start_index = st.session_state.start_index
             end_index = st.session_state.end_index
             
-            # Use processed (potentially filtered) data here
             df_cycle = df_processed[(df_processed['Index'] >= start_index) & (df_processed['Index'] <= end_index)].copy()
 
-            st.subheader("2. Identify P, QRS, and T Complexes")
-            st.write("Use the sliders to highlight the different parts of the ECG cycle.")
+            st.subheader("3. Identify P, QRS, and T Complexes")
             cycle_duration = end_index - start_index
             
-            p_wave_range = st.slider(
-                "Select P Wave Range",
-                min_value=start_index,
-                max_value=end_index,
-                value=(start_index, start_index + (cycle_duration * 0.15)),
-                step=step_size/2
-            )
-            
-            qrs_complex_range = st.slider(
-                "Select QRS Complex Range",
-                min_value=start_index,
-                max_value=end_index,
-                value=(start_index + (cycle_duration * 0.2), start_index + (cycle_duration * 0.4)),
-                step=step_size/2
-            )
-            
-            t_wave_range = st.slider(
-                "Select T Wave Range",
-                min_value=start_index,
-                max_value=end_index,
-                value=(start_index + (cycle_duration * 0.5), start_index + (cycle_duration * 0.8)),
-                step=step_size/2
-            )
+            p_wave_range = st.slider("Select P Wave Range", min_value=start_index, max_value=end_index, value=(start_index, start_index + (cycle_duration * 0.15)), step=step_size/2)
+            qrs_complex_range = st.slider("Select QRS Complex Range", min_value=start_index, max_value=end_index, value=(start_index + (cycle_duration * 0.2), start_index + (cycle_duration * 0.4)), step=step_size/2)
+            t_wave_range = st.slider("Select T Wave Range", min_value=start_index, max_value=end_index, value=(start_index + (cycle_duration * 0.5), start_index + (cycle_duration * 0.8)), step=step_size/2)
 
-            st.subheader("Highlighted ECG Cycle")
-            fig_highlight, ax_highlight = plt.subplots(figsize=(10, 6))
-            
-            ax_highlight.plot(df_cycle['Index'], df_cycle['Value'], label='Single ECG Cycle', color='black', zorder=10)
-
-            ax_highlight.axvspan(p_wave_range[0], p_wave_range[1], color='blue', alpha=0.3, 
-                                 label=f'P Wave ({p_wave_range[1]-p_wave_range[0]:.3f} s)')
-            
-            ax_highlight.axvspan(qrs_complex_range[0], qrs_complex_range[1], color='red', alpha=0.3, 
-                                 label=f'QRS ({qrs_complex_range[1]-qrs_complex_range[0]:.3f} s)')
-            
-            ax_highlight.axvspan(t_wave_range[0], t_wave_range[1], color='green', alpha=0.3, 
-                                 label=f'T Wave ({t_wave_range[1]-t_wave_range[0]:.3f} s)')
-            
-            ax_highlight.set_title('Highlighted ECG Complexes')
-            ax_highlight.set_ylabel('Amplitude (mV)')
-            ax_highlight.set_xlabel('Time')
-            ax_highlight.set_xlim(start_index, end_index) 
-            ax_highlight.grid(True)
-            ax_highlight.legend()
-
-            st.pyplot(fig_highlight)
-
+            # Store segments
             st.session_state.p_wave_data = df_cycle[(df_cycle['Index'] >= p_wave_range[0]) & (df_cycle['Index'] <= p_wave_range[1])]
             st.session_state.qrs_data = df_cycle[(df_cycle['Index'] >= qrs_complex_range[0]) & (df_cycle['Index'] <= qrs_complex_range[1])]
             st.session_state.t_wave_data = df_cycle[(df_cycle['Index'] >= t_wave_range[0]) & (df_cycle['Index'] <= t_wave_range[1])]
 
-            st.write("---")
-            st.write(f"**P Wave Duration:** {p_wave_range[1]-p_wave_range[0]:.3f} s")
-            st.write(f"**QRS Complex Duration:** {qrs_complex_range[1]-qrs_complex_range[0]:.3f} s")
-            st.write(f"**T Wave Duration:** {t_wave_range[1]-t_wave_range[0]:.3f} s")
+            # --- PLOT HIGHLIGHTED REGIONS ---
+            fig_highlight, ax_highlight = plt.subplots(figsize=(10, 4))
+            ax_highlight.plot(df_cycle['Index'], df_cycle['Value'], color='black', alpha=0.6, label='Raw Cycle')
+            ax_highlight.axvspan(p_wave_range[0], p_wave_range[1], color='blue', alpha=0.2, label='P Wave')
+            ax_highlight.axvspan(qrs_complex_range[0], qrs_complex_range[1], color='red', alpha=0.2, label='QRS')
+            ax_highlight.axvspan(t_wave_range[0], t_wave_range[1], color='green', alpha=0.2, label='T Wave')
+            ax_highlight.legend()
+            st.pyplot(fig_highlight)
 
-            st.subheader("3. DFT Analysis of Segments")
+            st.markdown("---")
+            st.subheader("4. Segment-Based Frequency Domain Filtering")
+            st.info("Adjust the Bandpass settings below. The logic computes the FFT of the segment, zeroes out frequencies outside the range (Brick-wall), and reconstructs the signal.")
+
+            # Controls for Filtering
+            c_freq1, c_freq2 = st.columns(2)
+            with c_freq1:
+                low_cut_filter = st.number_input("Low Cutoff (Hz)", value=0.5, step=0.5, min_value=0.0)
+            with c_freq2:
+                high_cut_filter = st.number_input("High Cutoff (Hz)", value=40.0, step=1.0, max_value=fs_est/2)
+
+            # --- PROCESS SEGMENTS ---
+            # 1. P Wave
+            p_raw = st.session_state.p_wave_data['Value'].values
+            p_filtered = fft_brickwall_filter(p_raw, fs_est, low_cut_filter, high_cut_filter)
             
-            # Pass estimated fs to DFT function
+            # 2. QRS Wave
+            qrs_raw = st.session_state.qrs_data['Value'].values
+            qrs_filtered = fft_brickwall_filter(qrs_raw, fs_est, low_cut_filter, high_cut_filter)
+
+            # 3. T Wave
+            t_raw = st.session_state.t_wave_data['Value'].values
+            t_filtered = fft_brickwall_filter(t_raw, fs_est, low_cut_filter, high_cut_filter)
+
+            # --- VISUALIZE RECONSTRUCTION ---
+            st.write("### Filtered Segments Reconstruction")
+            
+            fig_recon, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+            
+            # P Wave Plot
+            ax1.set_title("P Wave")
+            if len(p_raw) > 0:
+                ax1.plot(st.session_state.p_wave_data['Index'], p_raw, color='lightgray', label='Raw')
+                ax1.plot(st.session_state.p_wave_data['Index'], p_filtered, color='blue', label='Filtered (DFT)')
+                ax1.legend()
+            
+            # QRS Plot
+            ax2.set_title("QRS Complex")
+            if len(qrs_raw) > 0:
+                ax2.plot(st.session_state.qrs_data['Index'], qrs_raw, color='lightgray', label='Raw')
+                ax2.plot(st.session_state.qrs_data['Index'], qrs_filtered, color='red', label='Filtered (DFT)')
+                ax2.legend()
+
+            # T Wave Plot
+            ax3.set_title("T Wave")
+            if len(t_raw) > 0:
+                ax3.plot(st.session_state.t_wave_data['Index'], t_raw, color='lightgray', label='Raw')
+                ax3.plot(st.session_state.t_wave_data['Index'], t_filtered, color='green', label='Filtered (DFT)')
+                ax3.legend()
+            
+            st.pyplot(fig_recon)
+
+            # --- SHOW DFT SPECTRUM (Using your original manual calculation function) ---
+            st.subheader("DFT Spectrum of Segments (Magnitude)")
+            
             xf_p, yf_p, fs_p = calculate_dft(st.session_state.p_wave_data, fs_est)
             xf_qrs, yf_qrs, fs_qrs = calculate_dft(st.session_state.qrs_data, fs_est)
             xf_t, yf_t, fs_t = calculate_dft(st.session_state.t_wave_data, fs_est)
 
-            fig_dft, ax_dft = plt.subplots(figsize=(10, 6))
+            fig_dft, ax_dft = plt.subplots(figsize=(10, 5))
+            if len(xf_p) > 0: ax_dft.plot(xf_p, yf_p, label='P Wave', color='blue', alpha=0.7)
+            if len(xf_qrs) > 0: ax_dft.plot(xf_qrs, yf_qrs, label='QRS Complex', color='red', alpha=0.7)
+            if len(xf_t) > 0: ax_dft.plot(xf_t, yf_t, label='T Wave', color='green', alpha=0.7)
             
-            plot_empty = True
+            # Draw cutoff lines to show what was kept
+            ax_dft.axvline(low_cut_filter, color='k', linestyle='--', alpha=0.5, label='Cutoff')
+            ax_dft.axvline(high_cut_filter, color='k', linestyle='--', alpha=0.5)
 
-            if fs_p > 0 and len(xf_p) > 0:
-                ax_dft.plot(xf_p, yf_p, label=f'P Wave (fs={fs_p:.1f} Hz)', color='blue', alpha=0.7)
-                plot_empty = False
-            
-            if fs_qrs > 0 and len(xf_qrs) > 0:
-                ax_dft.plot(xf_qrs, yf_qrs, label=f'QRS Complex (fs={fs_qrs:.1f} Hz)', color='red', alpha=0.7)
-                plot_empty = False
-
-            if fs_t > 0 and len(xf_t) > 0:
-                ax_dft.plot(xf_t, yf_t, label=f'T Wave (fs={fs_t:.1f} Hz)', color='green', alpha=0.7)
-                plot_empty = False
-
-            if plot_empty:
-                st.write("Not enough data selected in any segment to plot DFT.")
-            else:
-                ax_dft.set_title("Combined DFT Analysis of ECG Segments (Padded to 200 points)")
-                ax_dft.set_xlabel("Frequency (Hz)")
-                ax_dft.set_ylabel("Amplitude")
-                
-                ax_dft.grid(True, which="both", ls="--")
-                ax_dft.legend()
-                st.pyplot(fig_dft, use_container_width=True)
+            ax_dft.set_xlabel("Frequency (Hz)")
+            ax_dft.set_ylabel("Magnitude")
+            ax_dft.legend()
+            st.pyplot(fig_dft)
