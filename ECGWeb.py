@@ -3,13 +3,19 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import os
+from scipy.signal import butter, filtfilt
 
 # --- FILTERING FUNCTIONS ---
-def apply_mav(data, window_size):
-    # Simple Moving Average using convolution
-    window = np.ones(window_size) / window_size
-    # mode='same' returns output of length max(M, N) - boundary effects are visible at edges
-    y = np.convolve(data, window, mode='same')
+def butter_bandpass(lowcut, highcut, fs, order=5):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
+    return b, a
+
+def apply_bandpass(data, lowcut, highcut, fs, order=5):
+    b, a = butter_bandpass(lowcut, highcut, fs, order=order)
+    y = filtfilt(b, a, data)
     return y
 
 @st.cache_data
@@ -132,26 +138,30 @@ if file_to_load is not None:
         # --- FILTERING CONTROLS ---
         st.sidebar.subheader("Noise Filtering")
         
-        # Explicit MAV Filter Controls
-        apply_mav_filter = st.sidebar.checkbox("Apply Moving Average (MAV)", value=True)
+        # Bandpass Filter Controls (Butterworth)
+        apply_filter = st.sidebar.checkbox("Apply Bandpass Filter", value=True)
         
         df_processed = df.copy() # Working copy
         raw_df_for_plot = None   # For visualization comparison
 
-        if apply_mav_filter:
-            window_size = st.sidebar.slider(
-                "Window Size (Points)", 
-                min_value=3, 
-                max_value=50, 
-                value=5, 
-                help="Higher values smooth more but may reduce peak heights (QRS)."
-            )
+        if apply_filter:
+            # Typical ECG Bandpass range: 0.5Hz to 40Hz
+            st.sidebar.write("Butterworth Filter Settings:")
+            low_cut = st.sidebar.slider("Low Cutoff (Hz)", 0.1, 5.0, 0.5, 0.1, help="Removes baseline wander")
+            # Limit high cut to Nyquist frequency
+            max_freq = float(fs_est / 2.0) - 1.0
+            default_high = 40.0 if max_freq > 40.0 else max_freq
+            
+            high_cut = st.sidebar.slider("High Cutoff (Hz)", 10.0, max_freq, default_high, 1.0, help="Removes high freq noise")
             
             try:
-                filtered_signal = apply_mav(df['Value'], window_size)
-                df_processed['Value'] = filtered_signal
-                raw_df_for_plot = df # Save original for comparison plot
-                st.sidebar.success(f"MAV (N={window_size}) Active")
+                if low_cut >= high_cut:
+                     st.sidebar.error("Low cutoff must be lower than High cutoff.")
+                else:
+                    filtered_signal = apply_bandpass(df['Value'], low_cut, high_cut, fs_est)
+                    df_processed['Value'] = filtered_signal
+                    raw_df_for_plot = df # Save original for comparison plot
+                    st.sidebar.success(f"Bandpass ({low_cut}-{high_cut} Hz) Active")
             except Exception as e:
                 st.sidebar.error(f"Filter Error: {e}")
 
