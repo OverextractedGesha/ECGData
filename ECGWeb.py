@@ -4,6 +4,49 @@ import pandas as pd
 import numpy as np
 import os
 
+# --- HELPER: Auto-Calculate Bandwidth ---
+def calculate_optimal_bandwidth(data, fs):
+    """
+    Calculates optimal filter parameters based on signal power.
+    1. Low Cut: Defaults to 0.5 Hz (Standard for baseline removal).
+    2. High Cut: Finds the frequency containing 95% of signal energy.
+    """
+    # Remove DC component
+    data_no_dc = data - np.mean(data)
+    
+    # Compute FFT
+    fft_vals = np.fft.rfft(data_no_dc)
+    frequencies = np.fft.rfftfreq(len(data_no_dc), d=1.0/fs)
+    power_spectrum = np.abs(fft_vals)**2
+    
+    # We focus on the range > 0.1 Hz to ignore DC/Very low freq
+    valid_mask = frequencies > 0.1
+    valid_freqs = frequencies[valid_mask]
+    valid_power = power_spectrum[valid_mask]
+    
+    if len(valid_power) == 0:
+        return 0.5, 40.0 # Fallback
+    
+    # Cumulative Power Calculation
+    total_power = np.sum(valid_power)
+    cumulative_power = np.cumsum(valid_power)
+    
+    # Find frequency where 95% of power is contained
+    target_power = 0.95 * total_power
+    idx_95 = np.searchsorted(cumulative_power, target_power)
+    
+    if idx_95 < len(valid_freqs):
+        optimal_high = valid_freqs[idx_95]
+    else:
+        optimal_high = 40.0
+        
+    # Safety Clamps for ECG
+    # QRS complex needs at least ~15-20Hz to keep shape.
+    # 50/60Hz is mains noise, so we usually want to stay below that.
+    optimal_high = max(15.0, min(optimal_high, 45.0))
+    
+    return 0.5, optimal_high
+
 # --- MANUALLY CODED FILTER FUNCTIONS (No Scipy) ---
 
 def manual_iir_lowpass(data, cutoff, fs):
@@ -193,14 +236,31 @@ if file_to_load is not None:
         raw_df_for_plot = None   # For visualization comparison
 
         if apply_filter:
+            # Initialize Session State for Filter Values if not present
+            if "filter_low" not in st.session_state:
+                st.session_state.filter_low = 0.5
+            if "filter_high" not in st.session_state:
+                st.session_state.filter_high = 40.0
+                
+            # Define Auto-Calculate Callback
+            def auto_calc_callback():
+                rec_l, rec_h = calculate_optimal_bandwidth(df['Value'].values, fs_est)
+                st.session_state.filter_low = rec_l
+                st.session_state.filter_high = rec_h
+                # Show a toast notification
+                st.toast(f"Set parameters: {rec_l:.1f} - {rec_h:.1f} Hz based on 95% Power Bandwidth")
+
+            st.sidebar.button("Auto-Calculate Optimal Bandwidth", on_click=auto_calc_callback, help="Calculates 95% Power Bandwidth to remove noise while keeping signal.")
+
             # Typical ECG Bandpass range: 0.5Hz to 40Hz
             st.sidebar.write("**Manual IIR Filter Settings:**")
-            low_cut = st.sidebar.slider("Low Cutoff (Hz)", 0.1, 5.0, 0.5, 0.1, help="High Pass: Removes baseline wander")
+            
+            low_cut = st.sidebar.slider("Low Cutoff (Hz)", 0.1, 5.0, key="filter_low", step=0.1, help="High Pass: Removes baseline wander")
+            
             # Limit high cut to Nyquist frequency
             max_freq = float(fs_est / 2.0) - 1.0
-            default_high = 40.0 if max_freq > 40.0 else max_freq
             
-            high_cut = st.sidebar.slider("High Cutoff (Hz)", 10.0, max_freq, default_high, 1.0, help="Low Pass: Removes high freq noise")
+            high_cut = st.sidebar.slider("High Cutoff (Hz)", 10.0, max_freq, key="filter_high", step=1.0, help="Low Pass: Removes high freq noise")
             
             try:
                 if low_cut >= high_cut:
