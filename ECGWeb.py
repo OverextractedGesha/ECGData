@@ -215,13 +215,17 @@ if file_to_load is not None:
             st.markdown("---")
             st.subheader("4. Segment Analysis")
             
-            # --- FILTER INPUTS ---
+            # --- FILTER INPUTS (FIXED HERE) ---
             st.write("**Frequency Domain Filter Settings**")
             c_freq1, c_freq2 = st.columns(2)
-            with c_freq1: low_dft = st.number_input("DFT Low Cut (Hz)", 0.5, step=0.5)
-            with c_freq2: high_dft = st.number_input("DFT High Cut (Hz)", 40.0, step=1.0)
+            with c_freq1: 
+                # Explicitly set min_value=0.0 and value=0.5
+                low_dft = st.number_input("DFT Low Cut (Hz)", min_value=0.0, value=0.5, step=0.5)
+            with c_freq2: 
+                # Explicitly set min_value=1.0 and value=40.0
+                high_dft = st.number_input("DFT High Cut (Hz)", min_value=1.0, value=40.0, step=1.0)
             
-            # --- 1. CALCULATE AND PLOT DFT (NOW FIRST) ---
+            # --- 1. CALCULATE AND PLOT DFT ---
             st.write("#### A. DFT Spectrum (Frequency Domain)")
             xf_p, yf_p, _ = calculate_dft(st.session_state.p_data, fs_est)
             xf_qrs, yf_qrs, _ = calculate_dft(st.session_state.qrs_data, fs_est)
@@ -240,7 +244,7 @@ if file_to_load is not None:
             ax_dft.legend()
             st.pyplot(fig_dft)
 
-            # --- 2. CALCULATE AND PLOT RECONSTRUCTION (NOW SECOND) ---
+            # --- 2. CALCULATE AND PLOT RECONSTRUCTION ---
             st.write("#### B. Reconstructed Signal (Time Domain)")
             
             # Process Filter
