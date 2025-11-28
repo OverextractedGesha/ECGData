@@ -63,7 +63,7 @@ def create_full_plot(df, x_range=None, raw_df=None):
     
     if raw_df is not None:
         ax.plot(raw_df['Index'], raw_df['Value'], label='Original Raw', color='lightgray', alpha=0.6, linewidth=1)
-        ax.plot(df['Index'], df['Value'], label='Filtered Signal', color='#1f77b4', linewidth=1.2)
+        ax.plot(df['Index'], df['Value'], label='Pre-Filtered Signal', color='#1f77b4', linewidth=1.2)
     else:
         ax.plot(df['Index'], df['Value'], label='Signal', color='#1f77b4', linewidth=1)
         
@@ -215,28 +215,26 @@ if file_to_load is not None:
             st.markdown("---")
             st.subheader("4. Segment Analysis")
             
-            # --- FILTER INPUTS (FIXED HERE) ---
+            # --- FILTER INPUTS ---
             st.write("**Frequency Domain Filter Settings**")
             c_freq1, c_freq2 = st.columns(2)
             with c_freq1: 
-                # Explicitly set min_value=0.0 and value=0.5
                 low_dft = st.number_input("DFT Low Cut (Hz)", min_value=0.0, value=0.5, step=0.5)
             with c_freq2: 
-                # Explicitly set min_value=1.0 and value=40.0
                 high_dft = st.number_input("DFT High Cut (Hz)", min_value=1.0, value=40.0, step=1.0)
             
-            # --- 1. CALCULATE AND PLOT DFT ---
-            st.write("#### A. DFT Spectrum (Frequency Domain)")
+            # --- 1. CALCULATE DFT ---
             xf_p, yf_p, _ = calculate_dft(st.session_state.p_data, fs_est)
             xf_qrs, yf_qrs, _ = calculate_dft(st.session_state.qrs_data, fs_est)
             xf_t, yf_t, _ = calculate_dft(st.session_state.t_data, fs_est)
             
+            # --- PLOT 1: DFT SPECTRUM ---
+            st.write("#### A. DFT Spectrum")
             fig_dft, ax_dft = plt.subplots(figsize=(10, 5))
             if len(xf_p)>0: ax_dft.plot(xf_p, yf_p, label='P', color='blue')
             if len(xf_qrs)>0: ax_dft.plot(xf_qrs, yf_qrs, label='QRS', color='red')
             if len(xf_t)>0: ax_dft.plot(xf_t, yf_t, label='T', color='green')
             
-            # Add cutoff lines
             ax_dft.axvline(low_dft, c='k', ls='--', alpha=0.5, label='Cutoff')
             ax_dft.axvline(high_dft, c='k', ls='--', alpha=0.5)
             ax_dft.set_xlabel("Frequency (Hz)")
@@ -244,10 +242,7 @@ if file_to_load is not None:
             ax_dft.legend()
             st.pyplot(fig_dft)
 
-            # --- 2. CALCULATE AND PLOT RECONSTRUCTION ---
-            st.write("#### B. Reconstructed Signal (Time Domain)")
-            
-            # Process Filter
+            # --- PROCESS FILTERS ---
             p_raw = st.session_state.p_data['Value'].values
             p_filt = fft_brickwall_filter(p_raw, fs_est, low_dft, high_dft)
             qrs_raw = st.session_state.qrs_data['Value'].values
@@ -255,7 +250,8 @@ if file_to_load is not None:
             t_raw = st.session_state.t_data['Value'].values
             t_filt = fft_brickwall_filter(t_raw, fs_est, low_dft, high_dft)
 
-            # Recon Plot
+            # --- PLOT 2: SEGMENT RECONSTRUCTION (SIDE-BY-SIDE) ---
+            st.write("#### B. Individual Segment Reconstruction")
             fig_rec, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
             
             ax1.set_title("P Wave")
@@ -272,5 +268,27 @@ if file_to_load is not None:
             ax3.plot(st.session_state.t_data['Index'], t_raw, color='lightgray', label='Input')
             ax3.plot(st.session_state.t_data['Index'], t_filt, color='green', label='Filtered')
             ax3.legend()
-            
             st.pyplot(fig_rec)
+
+            # --- PLOT 3: FULL CYCLE COMPARISON (NEW) ---
+            st.write("#### C. Full Cycle Comparison")
+            fig_full_cycle, ax_fc = plt.subplots(figsize=(10, 6))
+            
+            # Plot the original cycle background
+            ax_fc.plot(df_cycle['Index'], df_cycle['Value'], color='gray', linestyle='--', alpha=0.4, label='Cycle Input (Pre-filtered)')
+            
+            # Overlay the filtered segments
+            if len(p_filt) > 0:
+                ax_fc.plot(st.session_state.p_data['Index'], p_filt, color='blue', linewidth=1.5, label='Filtered P')
+            if len(qrs_filt) > 0:
+                ax_fc.plot(st.session_state.qrs_data['Index'], qrs_filt, color='red', linewidth=1.5, label='Filtered QRS')
+            if len(t_filt) > 0:
+                ax_fc.plot(st.session_state.t_data['Index'], t_filt, color='green', linewidth=1.5, label='Filtered T')
+
+            ax_fc.set_title("Filtered Segments overlaid on Original Cycle")
+            ax_fc.set_xlabel("Time")
+            ax_fc.set_ylabel("Amplitude")
+            ax_fc.legend()
+            ax_fc.grid(True, alpha=0.3)
+            
+            st.pyplot(fig_full_cycle)
