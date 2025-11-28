@@ -63,13 +63,14 @@ def create_full_plot(df, x_range=None, raw_df=None):
     
     if raw_df is not None:
         ax.plot(raw_df['Index'], raw_df['Value'], label='Original Raw', color='lightgray', alpha=0.6, linewidth=1)
-        ax.plot(df['Index'], df['Value'], label='Pre-Filtered Signal', color='#1f77b4', linewidth=1.2)
+        ax.plot(df['Index'], df['Value'], label='Filtered Signal', color='#1f77b4', linewidth=1.2)
     else:
-        ax.plot(df['Index'], df['Value'], label='Signal', color='#1f77b4', linewidth=1)
+        # Changed color to black/dark blue for better visibility on white background
+        ax.plot(df['Index'], df['Value'], label='Final Bandpass Filtered Signal', color='#004cc9', linewidth=1)
         
-    ax.set_title('ECG Signal Preview')
+    ax.set_title('ECG Signal Analysis')
     ax.set_ylabel('Amplitude (mV)')
-    ax.set_xlabel('Time')
+    ax.set_xlabel('Time (s)')
     ax.grid(True, alpha=0.3)
     if x_range: ax.set_xlim(x_range)
     ax.legend()
@@ -269,18 +270,27 @@ if file_to_load is not None:
             st.pyplot(fig_rec)
 
             st.markdown("---")
-            st.subheader("5. Global DFT Filter Application")
-            st.info(f"Applying the Frequency Domain Brick-wall filter ({low_dft}Hz - {high_dft}Hz) to the entire dataset.")
+            st.subheader("5. Final Output: Global Bandpass Filter")
             
             # --- APPLY DFT FILTER TO GLOBAL DATA ---
-            # Note: We take 'df_processed' (which might already be IIR filtered) as input
             global_signal = df_processed['Value'].values
             global_filtered = fft_brickwall_filter(global_signal, fs_est, low_dft, high_dft)
             
-            # Create comparison dataframe for plotting
             df_global_filtered = df_processed.copy()
             df_global_filtered['Value'] = global_filtered
             
-            # Reuse the full plot function
-            fig_global_check = create_full_plot(df_global_filtered, zoom_range, raw_df=df_processed)
+            # --- FINAL PLOT CONTROLS ---
+            # Independent slider that defaults to full range
+            final_min_t = float(df_global_filtered['Index'].min())
+            final_max_t = float(df_global_filtered['Index'].max())
+            
+            final_zoom_range = st.slider(
+                "Final Result Zoom", 
+                min_value=final_min_t, 
+                max_value=final_max_t, 
+                value=(final_min_t, final_max_t) # Default to Full Range
+            )
+            
+            # Plot ONLY the filtered data (raw_df=None)
+            fig_global_check = create_full_plot(df_global_filtered, x_range=final_zoom_range, raw_df=None)
             st.pyplot(fig_global_check)
