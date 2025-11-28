@@ -29,8 +29,8 @@ def manual_iir_highpass(data, cutoff, fs):
         y[i] = alpha * (y[i-1] + data[i] - data[i-1])
     return y
 
-# --- HELPER: Frequency Domain Filter (Brick-wall) ---
-def fft_brickwall_filter(data_segment, fs, low_cut, high_cut):
+# --- HELPER: Frequency Domain Filter (Brick-wall + Notch) ---
+def fft_brickwall_filter(data_segment, fs, low_cut, high_cut, use_notch=False, notch_freq=50.0):
     n = len(data_segment)
     if n == 0: return data_segment
     
@@ -38,10 +38,19 @@ def fft_brickwall_filter(data_segment, fs, low_cut, high_cut):
     fft_coeffs = np.fft.fft(data_segment)
     frequencies = np.fft.fftfreq(n, d=1/fs)
     
-    # 2. Create Mask
+    # 2. Create Bandpass Mask
+    # Keep frequencies BETWEEN low_cut and high_cut
     mask = (np.abs(frequencies) >= low_cut) & (np.abs(frequencies) <= high_cut)
     
-    # 3. Apply mask and Inverse FFT
+    # 3. Create Notch Mask (If enabled)
+    # Remove frequencies strictly AROUND the notch freq (e.g., 48-52Hz)
+    if use_notch:
+        notch_width = 2.0 # +/- 2 Hz
+        notch_mask = (np.abs(frequencies) < (notch_freq - notch_width)) | \
+                     (np.abs(frequencies) > (notch_freq + notch_width))
+        mask = mask & notch_mask # Combine masks
+    
+    # 4. Apply mask and Inverse FFT
     fft_filtered = fft_coeffs * mask
     filtered_signal = np.fft.ifft(fft_filtered)
     
@@ -65,8 +74,7 @@ def create_full_plot(df, x_range=None, raw_df=None):
         ax.plot(raw_df['Index'], raw_df['Value'], label='Original Raw', color='lightgray', alpha=0.6, linewidth=1)
         ax.plot(df['Index'], df['Value'], label='Filtered Signal', color='#1f77b4', linewidth=1.2)
     else:
-        # Changed color to black/dark blue for better visibility on white background
-        ax.plot(df['Index'], df['Value'], label='Final Bandpass Filtered Signal', color='#004cc9', linewidth=1)
+        ax.plot(df['Index'], df['Value'], label='Final Processed Signal', color='#004cc9', linewidth=1)
         
     ax.set_title('ECG Signal Analysis')
     ax.set_ylabel('Amplitude (mV)')
@@ -106,7 +114,7 @@ def calculate_dft(df_segment, fs):
     return xf_positive, yf_positive_magnitude, fs
 
 # --- MAIN APP ---
-st.title("ECG Analysis: Bandpass Pre-Filtering")
+st.title("ECG Analysis: Bandpass + Notch")
 
 # 1. Data Load
 st.sidebar.header("1. Data Load")
@@ -134,23 +142,23 @@ if file_to_load is not None:
         # --- PRE-FILTERING SECTION ---
         st.sidebar.markdown("---")
         st.sidebar.header("2. Pre-Filtering (Global)")
-        st.sidebar.caption("Optimal: Enable BOTH to create a Bandpass Filter.")
         
         df_processed = df_raw.copy()
         is_filtered = False
 
         # 1. High Pass Checkbox
-        use_hpf = st.sidebar.checkbox("Enable High Pass (Remove Drift)", value=True)
+        use_hpf = st.sidebar.checkbox("Enable HPF (Remove Drift)", value=True)
         if use_hpf:
             cutoff_h = st.sidebar.slider("HPF Cutoff (Hz)", 0.1, 5.0, 0.5, step=0.1)
             df_processed['Value'] = manual_iir_highpass(df_processed['Value'].values, cutoff_h, fs_est)
             is_filtered = True
             
         # 2. Low Pass Checkbox
-        use_lpf = st.sidebar.checkbox("Enable Low Pass (Remove Noise)", value=True)
+        use_lpf = st.sidebar.checkbox("Enable LPF (Remove High Freq)", value=True)
         if use_lpf:
+            # Allow this to go higher now
             max_cutoff = float(fs_est / 2.0) - 1.0
-            cutoff_l = st.sidebar.slider("LPF Cutoff (Hz)", 10.0, max_cutoff, 40.0, step=1.0)
+            cutoff_l = st.sidebar.slider("LPF Cutoff (Hz)", 10.0, max_cutoff, 100.0, step=1.0)
             df_processed['Value'] = manual_iir_lowpass(df_processed['Value'].values, cutoff_l, fs_est)
             is_filtered = True
 
@@ -217,12 +225,16 @@ if file_to_load is not None:
             st.subheader("4. Segment Analysis")
             
             # --- FILTER INPUTS ---
-            st.write("**Frequency Domain Filter Settings (Tuning)**")
-            c_freq1, c_freq2 = st.columns(2)
+            st.info("Tip: To keep the QRS sharp, increase 'DFT High Cut' (> 60Hz) and use the Notch Filter to remove fuzz.")
+            c_freq1, c_freq2, c_notch = st.columns(3)
             with c_freq1: 
                 low_dft = st.number_input("DFT Low Cut (Hz)", min_value=0.0, value=0.5, step=0.5)
             with c_freq2: 
-                high_dft = st.number_input("DFT High Cut (Hz)", min_value=1.0, value=40.0, step=1.0)
+                # INCREASE DEFAULT HIGH CUT
+                high_dft = st.number_input("DFT High Cut (Hz)", min_value=1.0, value=100.0, step=1.0)
+            with c_notch:
+                use_notch = st.checkbox("Apply Notch Filter", value=True)
+                notch_freq = st.selectbox("Notch Freq", [50, 60], index=0)
             
             # --- 1. CALCULATE DFT ---
             xf_p, yf_p, _ = calculate_dft(st.session_state.p_data, fs_est)
@@ -236,8 +248,12 @@ if file_to_load is not None:
             if len(xf_qrs)>0: ax_dft.plot(xf_qrs, yf_qrs, label='QRS', color='red')
             if len(xf_t)>0: ax_dft.plot(xf_t, yf_t, label='T', color='green')
             
-            ax_dft.axvline(low_dft, c='k', ls='--', alpha=0.5, label='Cutoff')
+            ax_dft.axvline(low_dft, c='k', ls='--', alpha=0.5, label='Bandpass')
             ax_dft.axvline(high_dft, c='k', ls='--', alpha=0.5)
+            
+            if use_notch:
+                ax_dft.axvspan(notch_freq-2, notch_freq+2, color='orange', alpha=0.3, label='Notch (Removed)')
+
             ax_dft.set_xlabel("Frequency (Hz)")
             ax_dft.set_ylabel("Magnitude")
             ax_dft.legend()
@@ -245,11 +261,11 @@ if file_to_load is not None:
 
             # --- PROCESS SEGMENT FILTERS ---
             p_raw = st.session_state.p_data['Value'].values
-            p_filt = fft_brickwall_filter(p_raw, fs_est, low_dft, high_dft)
+            p_filt = fft_brickwall_filter(p_raw, fs_est, low_dft, high_dft, use_notch, notch_freq)
             qrs_raw = st.session_state.qrs_data['Value'].values
-            qrs_filt = fft_brickwall_filter(qrs_raw, fs_est, low_dft, high_dft)
+            qrs_filt = fft_brickwall_filter(qrs_raw, fs_est, low_dft, high_dft, use_notch, notch_freq)
             t_raw = st.session_state.t_data['Value'].values
-            t_filt = fft_brickwall_filter(t_raw, fs_est, low_dft, high_dft)
+            t_filt = fft_brickwall_filter(t_raw, fs_est, low_dft, high_dft, use_notch, notch_freq)
 
             # --- PLOT B: SEGMENT RECONSTRUCTION ---
             st.write("#### B. Individual Segment Reconstruction")
@@ -270,17 +286,16 @@ if file_to_load is not None:
             st.pyplot(fig_rec)
 
             st.markdown("---")
-            st.subheader("5. Final Output: Global Bandpass Filter")
+            st.subheader("5. Final Output: Global Filter (Bandpass + Notch)")
             
             # --- APPLY DFT FILTER TO GLOBAL DATA ---
             global_signal = df_processed['Value'].values
-            global_filtered = fft_brickwall_filter(global_signal, fs_est, low_dft, high_dft)
+            global_filtered = fft_brickwall_filter(global_signal, fs_est, low_dft, high_dft, use_notch, notch_freq)
             
             df_global_filtered = df_processed.copy()
             df_global_filtered['Value'] = global_filtered
             
             # --- FINAL PLOT CONTROLS ---
-            # Independent slider that defaults to full range
             final_min_t = float(df_global_filtered['Index'].min())
             final_max_t = float(df_global_filtered['Index'].max())
             
@@ -288,9 +303,8 @@ if file_to_load is not None:
                 "Final Result Zoom", 
                 min_value=final_min_t, 
                 max_value=final_max_t, 
-                value=(final_min_t, final_max_t) # Default to Full Range
+                value=(final_min_t, final_max_t) 
             )
             
-            # Plot ONLY the filtered data (raw_df=None)
             fig_global_check = create_full_plot(df_global_filtered, x_range=final_zoom_range, raw_df=None)
             st.pyplot(fig_global_check)
