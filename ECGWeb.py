@@ -216,7 +216,7 @@ if file_to_load is not None:
             st.subheader("4. Segment Analysis")
             
             # --- FILTER INPUTS ---
-            st.write("**Frequency Domain Filter Settings**")
+            st.write("**Frequency Domain Filter Settings (Tuning)**")
             c_freq1, c_freq2 = st.columns(2)
             with c_freq1: 
                 low_dft = st.number_input("DFT Low Cut (Hz)", min_value=0.0, value=0.5, step=0.5)
@@ -228,7 +228,7 @@ if file_to_load is not None:
             xf_qrs, yf_qrs, _ = calculate_dft(st.session_state.qrs_data, fs_est)
             xf_t, yf_t, _ = calculate_dft(st.session_state.t_data, fs_est)
             
-            # --- PLOT 1: DFT SPECTRUM ---
+            # --- PLOT A: DFT SPECTRUM ---
             st.write("#### A. DFT Spectrum")
             fig_dft, ax_dft = plt.subplots(figsize=(10, 5))
             if len(xf_p)>0: ax_dft.plot(xf_p, yf_p, label='P', color='blue')
@@ -242,7 +242,7 @@ if file_to_load is not None:
             ax_dft.legend()
             st.pyplot(fig_dft)
 
-            # --- PROCESS FILTERS ---
+            # --- PROCESS SEGMENT FILTERS ---
             p_raw = st.session_state.p_data['Value'].values
             p_filt = fft_brickwall_filter(p_raw, fs_est, low_dft, high_dft)
             qrs_raw = st.session_state.qrs_data['Value'].values
@@ -250,7 +250,7 @@ if file_to_load is not None:
             t_raw = st.session_state.t_data['Value'].values
             t_filt = fft_brickwall_filter(t_raw, fs_est, low_dft, high_dft)
 
-            # --- PLOT 2: SEGMENT RECONSTRUCTION (SIDE-BY-SIDE) ---
+            # --- PLOT B: SEGMENT RECONSTRUCTION ---
             st.write("#### B. Individual Segment Reconstruction")
             fig_rec, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
             
@@ -262,33 +262,25 @@ if file_to_load is not None:
             ax2.set_title("QRS Complex")
             ax2.plot(st.session_state.qrs_data['Index'], qrs_raw, color='lightgray', label='Input')
             ax2.plot(st.session_state.qrs_data['Index'], qrs_filt, color='red', label='Filtered')
-            ax2.legend()
             
             ax3.set_title("T Wave")
             ax3.plot(st.session_state.t_data['Index'], t_raw, color='lightgray', label='Input')
             ax3.plot(st.session_state.t_data['Index'], t_filt, color='green', label='Filtered')
-            ax3.legend()
             st.pyplot(fig_rec)
 
-            # --- PLOT 3: FULL CYCLE COMPARISON (NEW) ---
-            st.write("#### C. Full Cycle Comparison")
-            fig_full_cycle, ax_fc = plt.subplots(figsize=(10, 6))
+            st.markdown("---")
+            st.subheader("5. Global DFT Filter Application")
+            st.info(f"Applying the Frequency Domain Brick-wall filter ({low_dft}Hz - {high_dft}Hz) to the entire dataset.")
             
-            # Plot the original cycle background
-            ax_fc.plot(df_cycle['Index'], df_cycle['Value'], color='gray', linestyle='--', alpha=0.4, label='Cycle Input (Pre-filtered)')
+            # --- APPLY DFT FILTER TO GLOBAL DATA ---
+            # Note: We take 'df_processed' (which might already be IIR filtered) as input
+            global_signal = df_processed['Value'].values
+            global_filtered = fft_brickwall_filter(global_signal, fs_est, low_dft, high_dft)
             
-            # Overlay the filtered segments
-            if len(p_filt) > 0:
-                ax_fc.plot(st.session_state.p_data['Index'], p_filt, color='blue', linewidth=1.5, label='Filtered P')
-            if len(qrs_filt) > 0:
-                ax_fc.plot(st.session_state.qrs_data['Index'], qrs_filt, color='red', linewidth=1.5, label='Filtered QRS')
-            if len(t_filt) > 0:
-                ax_fc.plot(st.session_state.t_data['Index'], t_filt, color='green', linewidth=1.5, label='Filtered T')
-
-            ax_fc.set_title("Filtered Segments overlaid on Original Cycle")
-            ax_fc.set_xlabel("Time")
-            ax_fc.set_ylabel("Amplitude")
-            ax_fc.legend()
-            ax_fc.grid(True, alpha=0.3)
+            # Create comparison dataframe for plotting
+            df_global_filtered = df_processed.copy()
+            df_global_filtered['Value'] = global_filtered
             
-            st.pyplot(fig_full_cycle)
+            # Reuse the full plot function
+            fig_global_check = create_full_plot(df_global_filtered, zoom_range, raw_df=df_processed)
+            st.pyplot(fig_global_check)
