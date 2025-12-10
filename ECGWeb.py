@@ -39,7 +39,6 @@ def fft_brickwall_filter(data_segment, fs, low_cut, high_cut):
     frequencies = np.fft.fftfreq(n, d=1/fs)
     
     # 2. Create Bandpass Mask
-    # Keep frequencies BETWEEN low_cut and high_cut
     mask = (np.abs(frequencies) >= low_cut) & (np.abs(frequencies) <= high_cut)
     
     # 3. Apply mask and Inverse FFT
@@ -47,6 +46,13 @@ def fft_brickwall_filter(data_segment, fs, low_cut, high_cut):
     filtered_signal = np.fft.ifft(fft_filtered)
     
     return np.real(filtered_signal)
+
+# --- HELPER: Moving Average Filter ---
+def moving_average_filter(data, window_size):
+    window_size = int(window_size)
+    if window_size < 1: return data
+    window = np.ones(window_size) / float(window_size)
+    return np.convolve(data, window, 'same')
 
 @st.cache_data
 def load_data(file_path_or_buffer):
@@ -106,7 +112,7 @@ def calculate_dft(df_segment, fs):
     return xf_positive, yf_positive_magnitude, fs
 
 # --- MAIN APP ---
-st.title("ECG Analysis: Bandpass + Squaring")
+st.title("ECG Analysis: Bandpass + Squaring + MAV")
 
 # 1. Data Load
 st.sidebar.header("1. Data Load")
@@ -216,7 +222,7 @@ if file_to_load is not None:
             st.markdown("---")
             st.subheader("4. Segment Analysis")
             
-            # --- FILTER INPUTS (NOTCH REMOVED) ---
+            # --- FILTER INPUTS ---
             c_freq1, c_freq2 = st.columns(2)
             with c_freq1: 
                 low_dft = st.number_input("DFT Low Cut (Hz)", min_value=0.0, value=0.5, step=0.5)
@@ -243,7 +249,7 @@ if file_to_load is not None:
             ax_dft.legend()
             st.pyplot(fig_dft)
 
-            # --- PROCESS SEGMENT FILTERS (NO NOTCH) ---
+            # --- PROCESS SEGMENT FILTERS ---
             p_raw = st.session_state.p_data['Value'].values
             p_filt = fft_brickwall_filter(p_raw, fs_est, low_dft, high_dft)
             qrs_raw = st.session_state.qrs_data['Value'].values
@@ -293,32 +299,52 @@ if file_to_load is not None:
             fig_global_check = create_full_plot(df_global_filtered, x_range=final_zoom_range, raw_df=None)
             st.pyplot(fig_global_check)
 
-            # ---------------------------------------------------------
-            # --- SECTION 6: SQUARING (Pan-Tompkins Step) ---
-            # ---------------------------------------------------------
+            # --- SECTION 6: SQUARING ---
             st.markdown("---")
             st.subheader("6. Squaring Process")
-            st.write("""
-            **Squaring Function**: $y[n] = (x[n])^2$. 
-            Hasil dari proses Bandpass Filter dikuadratkan untuk menonjolkan puncak QRS.
-            """)
+            st.write("**Function**: $y[n] = (x[n])^2$. Hasil Bandpass dikuadratkan.")
 
-            # 1. Compute Squaring
             global_squared = global_filtered ** 2
 
-            # 2. Create Plot for Squaring
             fig_sq, ax_sq = plt.subplots(figsize=(10, 6))
-            
-            # Plot the squared signal
             ax_sq.plot(df_global_filtered['Index'], global_squared, color='#800080', label='Squared Signal', linewidth=1.2)
-            
-            ax_sq.set_title('Squaring Result (Post-Bandpass)')
-            ax_sq.set_ylabel('Amplitude ($mV^2$)') # Unit is squared now
+            ax_sq.set_title('Squaring Result')
+            ax_sq.set_ylabel('Amplitude ($mV^2$)') 
             ax_sq.set_xlabel('Time (s)')
             ax_sq.grid(True, alpha=0.3)
-            
-            # Sync x-axis with the zoom slider from Section 5
             ax_sq.set_xlim(final_zoom_range)
             ax_sq.legend()
-            
             st.pyplot(fig_sq)
+
+            # ---------------------------------------------------------
+            # --- SECTION 7: MOVING AVERAGE (MAV) ---
+            # ---------------------------------------------------------
+            st.markdown("---")
+            st.subheader("7. Moving Window Integration (MAV)")
+            st.write("""
+            **Moving Average Filter**: Meratakan sinyal hasil Squaring untuk mendapatkan 'envelope' kompleks QRS. 
+            Lebar window ideal biasanya sekitar 150ms (lebar rata-rata kompleks QRS).
+            """)
+
+            # 1. Slider untuk Window Size (dalam ms)
+            window_ms = st.slider("Window Width (ms)", 10, 400, 150, step=10)
+            
+            # 2. Konversi ms ke samples
+            window_samples = int(window_ms * fs_est / 1000.0)
+            if window_samples < 1: window_samples = 1
+            st.write(f"Window size: {window_ms} ms (~{window_samples} samples)")
+
+            # 3. Apply MAV
+            global_mav = moving_average_filter(global_squared, window_samples)
+
+            # 4. Plot MAV
+            fig_mav, ax_mav = plt.subplots(figsize=(10, 6))
+            ax_mav.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Output', linewidth=1.5)
+            
+            ax_mav.set_title('Moving Window Integration Result')
+            ax_mav.set_ylabel('Amplitude (Integrated)')
+            ax_mav.set_xlabel('Time (s)')
+            ax_mav.grid(True, alpha=0.3)
+            ax_mav.set_xlim(final_zoom_range) # Sync zoom
+            ax_mav.legend()
+            st.pyplot(fig_mav)
