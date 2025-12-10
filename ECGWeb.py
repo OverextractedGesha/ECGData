@@ -29,8 +29,8 @@ def manual_iir_highpass(data, cutoff, fs):
         y[i] = alpha * (y[i-1] + data[i] - data[i-1])
     return y
 
-# --- HELPER: Frequency Domain Filter (Brick-wall + Notch) ---
-def fft_brickwall_filter(data_segment, fs, low_cut, high_cut, use_notch=False, notch_freq=50.0):
+# --- HELPER: Frequency Domain Filter (Bandpass Only) ---
+def fft_brickwall_filter(data_segment, fs, low_cut, high_cut):
     n = len(data_segment)
     if n == 0: return data_segment
     
@@ -42,15 +42,7 @@ def fft_brickwall_filter(data_segment, fs, low_cut, high_cut, use_notch=False, n
     # Keep frequencies BETWEEN low_cut and high_cut
     mask = (np.abs(frequencies) >= low_cut) & (np.abs(frequencies) <= high_cut)
     
-    # 3. Create Notch Mask (If enabled)
-    # Remove frequencies strictly AROUND the notch freq (e.g., 48-52Hz)
-    if use_notch:
-        notch_width = 2.0 # +/- 2 Hz
-        notch_mask = (np.abs(frequencies) < (notch_freq - notch_width)) | \
-                     (np.abs(frequencies) > (notch_freq + notch_width))
-        mask = mask & notch_mask # Combine masks
-    
-    # 4. Apply mask and Inverse FFT
+    # 3. Apply mask and Inverse FFT
     fft_filtered = fft_coeffs * mask
     filtered_signal = np.fft.ifft(fft_filtered)
     
@@ -114,7 +106,7 @@ def calculate_dft(df_segment, fs):
     return xf_positive, yf_positive_magnitude, fs
 
 # --- MAIN APP ---
-st.title("ECG Analysis: Bandpass + Notch")
+st.title("ECG Analysis: Bandpass + Squaring")
 
 # 1. Data Load
 st.sidebar.header("1. Data Load")
@@ -224,17 +216,12 @@ if file_to_load is not None:
             st.markdown("---")
             st.subheader("4. Segment Analysis")
             
-            # --- FILTER INPUTS ---
-            st.info("Tip: To keep the QRS sharp, increase 'DFT High Cut' (> 60Hz) and use the Notch Filter to remove fuzz.")
-            c_freq1, c_freq2, c_notch = st.columns(3)
+            # --- FILTER INPUTS (NOTCH REMOVED) ---
+            c_freq1, c_freq2 = st.columns(2)
             with c_freq1: 
                 low_dft = st.number_input("DFT Low Cut (Hz)", min_value=0.0, value=0.5, step=0.5)
             with c_freq2: 
-                # INCREASE DEFAULT HIGH CUT
                 high_dft = st.number_input("DFT High Cut (Hz)", min_value=1.0, value=100.0, step=1.0)
-            with c_notch:
-                use_notch = st.checkbox("Apply Notch Filter", value=True)
-                notch_freq = st.selectbox("Notch Freq", [50, 60], index=0)
             
             # --- 1. CALCULATE DFT ---
             xf_p, yf_p, _ = calculate_dft(st.session_state.p_data, fs_est)
@@ -242,30 +229,27 @@ if file_to_load is not None:
             xf_t, yf_t, _ = calculate_dft(st.session_state.t_data, fs_est)
             
             # --- PLOT A: DFT SPECTRUM ---
-            st.write("#### A. DFT Spectrum")
+            st.write("#### A. DFT Spectrum (Bandpass Only)")
             fig_dft, ax_dft = plt.subplots(figsize=(10, 5))
             if len(xf_p)>0: ax_dft.plot(xf_p, yf_p, label='P', color='blue')
             if len(xf_qrs)>0: ax_dft.plot(xf_qrs, yf_qrs, label='QRS', color='red')
             if len(xf_t)>0: ax_dft.plot(xf_t, yf_t, label='T', color='green')
             
-            ax_dft.axvline(low_dft, c='k', ls='--', alpha=0.5, label='Bandpass')
+            ax_dft.axvline(low_dft, c='k', ls='--', alpha=0.5, label='Bandpass Limits')
             ax_dft.axvline(high_dft, c='k', ls='--', alpha=0.5)
             
-            if use_notch:
-                ax_dft.axvspan(notch_freq-2, notch_freq+2, color='orange', alpha=0.3, label='Notch (Removed)')
-
             ax_dft.set_xlabel("Frequency (Hz)")
             ax_dft.set_ylabel("Magnitude")
             ax_dft.legend()
             st.pyplot(fig_dft)
 
-            # --- PROCESS SEGMENT FILTERS ---
+            # --- PROCESS SEGMENT FILTERS (NO NOTCH) ---
             p_raw = st.session_state.p_data['Value'].values
-            p_filt = fft_brickwall_filter(p_raw, fs_est, low_dft, high_dft, use_notch, notch_freq)
+            p_filt = fft_brickwall_filter(p_raw, fs_est, low_dft, high_dft)
             qrs_raw = st.session_state.qrs_data['Value'].values
-            qrs_filt = fft_brickwall_filter(qrs_raw, fs_est, low_dft, high_dft, use_notch, notch_freq)
+            qrs_filt = fft_brickwall_filter(qrs_raw, fs_est, low_dft, high_dft)
             t_raw = st.session_state.t_data['Value'].values
-            t_filt = fft_brickwall_filter(t_raw, fs_est, low_dft, high_dft, use_notch, notch_freq)
+            t_filt = fft_brickwall_filter(t_raw, fs_est, low_dft, high_dft)
 
             # --- PLOT B: SEGMENT RECONSTRUCTION ---
             st.write("#### B. Individual Segment Reconstruction")
@@ -286,11 +270,11 @@ if file_to_load is not None:
             st.pyplot(fig_rec)
 
             st.markdown("---")
-            st.subheader("5. Final Output: Global Filter (Bandpass + Notch)")
+            st.subheader("5. Final Output: Global Filter (Bandpass Only)")
             
             # --- APPLY DFT FILTER TO GLOBAL DATA ---
             global_signal = df_processed['Value'].values
-            global_filtered = fft_brickwall_filter(global_signal, fs_est, low_dft, high_dft, use_notch, notch_freq)
+            global_filtered = fft_brickwall_filter(global_signal, fs_est, low_dft, high_dft)
             
             df_global_filtered = df_processed.copy()
             df_global_filtered['Value'] = global_filtered
@@ -308,3 +292,33 @@ if file_to_load is not None:
             
             fig_global_check = create_full_plot(df_global_filtered, x_range=final_zoom_range, raw_df=None)
             st.pyplot(fig_global_check)
+
+            # ---------------------------------------------------------
+            # --- SECTION 6: SQUARING (Pan-Tompkins Step) ---
+            # ---------------------------------------------------------
+            st.markdown("---")
+            st.subheader("6. Squaring Process")
+            st.write("""
+            **Squaring Function**: $y[n] = (x[n])^2$. 
+            Hasil dari proses Bandpass Filter dikuadratkan untuk menonjolkan puncak QRS.
+            """)
+
+            # 1. Compute Squaring
+            global_squared = global_filtered ** 2
+
+            # 2. Create Plot for Squaring
+            fig_sq, ax_sq = plt.subplots(figsize=(10, 6))
+            
+            # Plot the squared signal
+            ax_sq.plot(df_global_filtered['Index'], global_squared, color='#800080', label='Squared Signal', linewidth=1.2)
+            
+            ax_sq.set_title('Squaring Result (Post-Bandpass)')
+            ax_sq.set_ylabel('Amplitude ($mV^2$)') # Unit is squared now
+            ax_sq.set_xlabel('Time (s)')
+            ax_sq.grid(True, alpha=0.3)
+            
+            # Sync x-axis with the zoom slider from Section 5
+            ax_sq.set_xlim(final_zoom_range)
+            ax_sq.legend()
+            
+            st.pyplot(fig_sq)
