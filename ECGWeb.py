@@ -58,11 +58,9 @@ def manual_bandpass_filter(data, fs, low_cut, high_cut):
     No FFT, no scipy. Just math loops.
     """
     # 1. Apply Low Pass (Remove High Frequencies, e.g., > 15Hz)
-    # Note: We pass 'high_cut' as the limit for the Low Pass Filter
     step1_signal = manual_iir_lowpass(data, high_cut, fs)
     
     # 2. Apply High Pass (Remove Low Frequencies, e.g., < 5Hz)
-    # Note: We pass 'low_cut' as the limit for the High Pass Filter
     final_signal = manual_iir_highpass(step1_signal, low_cut, fs)
     
     return final_signal
@@ -73,7 +71,6 @@ def moving_average_filter(data, window_size):
     if window_size < 1: return data
     
     # Manual Convolution for Moving Average
-    # (Although np.convolve is standard, here is the manual logic concept)
     window = np.ones(window_size) / float(window_size)
     return np.convolve(data, window, 'same')
 
@@ -93,7 +90,7 @@ def create_full_plot(df, x_range=None, raw_df=None):
     
     if raw_df is not None:
         ax.plot(raw_df['Index'], raw_df['Value'], label='Original Raw', color='lightgray', alpha=0.6, linewidth=1)
-        ax.plot(df['Index'], df['Value'], label='Pre-Filtered', color='#1f77b4', linewidth=1.2)
+        ax.plot(df['Index'], df['Value'], label='Pre-Filtered Signal', color='#1f77b4', linewidth=1.2)
     else:
         ax.plot(df['Index'], df['Value'], label='Processed Signal', color='#004cc9', linewidth=1)
         
@@ -138,8 +135,7 @@ def calculate_dft(df_segment, fs):
 # -----------------------------------------------------------------------------
 # --- MAIN APP ---
 # -----------------------------------------------------------------------------
-st.title("ECG Analysis: Manual Calculations")
-st.write("Implementation: Time-Domain Difference Equations (IIR) instead of FFT.")
+st.title("ECG Analysis: Manual Calculations (Full)")
 
 # 1. Data Load
 st.sidebar.header("1. Data Load")
@@ -164,16 +160,29 @@ if file_to_load is not None:
             fs_est = 100.0
         st.sidebar.write(f"**Fs:** {fs_est:.1f} Hz")
         
-        # --- PRE-FILTERING (OPTIONAL CLEANUP) ---
+        # --- PRE-FILTERING (FULL VERSION RESTORED) ---
         st.sidebar.markdown("---")
-        st.sidebar.header("2. Pre-Filtering (Optional)")
+        st.sidebar.header("2. Pre-Filtering (Global)")
         
         df_processed = df_raw.copy()
-        
-        # Global drift removal (Using the same manual function)
-        use_hpf = st.sidebar.checkbox("Enable Initial Drift Removal", value=True)
+        is_filtered = False
+
+        # 1. High Pass Checkbox
+        use_hpf = st.sidebar.checkbox("Enable HPF (Remove Drift)", value=True)
         if use_hpf:
-            df_processed['Value'] = manual_iir_highpass(df_processed['Value'].values, 0.5, fs_est)
+            cutoff_h = st.sidebar.slider("HPF Cutoff (Hz)", 0.1, 5.0, 0.5, step=0.1)
+            df_processed['Value'] = manual_iir_highpass(df_processed['Value'].values, cutoff_h, fs_est)
+            is_filtered = True
+            
+        # 2. Low Pass Checkbox (RESTORED)
+        use_lpf = st.sidebar.checkbox("Enable LPF (Remove High Freq)", value=True)
+        if use_lpf:
+            max_cutoff = float(fs_est / 2.0) - 1.0
+            cutoff_l = st.sidebar.slider("LPF Cutoff (Hz)", 10.0, max_cutoff, 100.0, step=1.0)
+            df_processed['Value'] = manual_iir_lowpass(df_processed['Value'].values, cutoff_l, fs_est)
+            is_filtered = True
+
+        raw_for_plot = df_raw if is_filtered else None
             
         # --- MAIN PREVIEW ---
         st.subheader("1. Data Preview")
@@ -184,7 +193,7 @@ if file_to_load is not None:
         with col1:
              zoom_range = st.slider("Zoom (Time Range)", min_time, max_time, (min_time, max_time))
         
-        fig_full = create_full_plot(df_processed, zoom_range, raw_df=df_raw if use_hpf else None) 
+        fig_full = create_full_plot(df_processed, zoom_range, raw_df=raw_for_plot) 
         st.pyplot(fig_full)
 
         # --- CYCLE SELECTION ---
@@ -236,25 +245,44 @@ if file_to_load is not None:
             st.subheader("4. Segment Analysis")
             
             # --- FILTER INPUTS ---
-            st.write("Define Bandpass Frequencies (Pan-Tompkins typically uses 5-15 Hz):")
+            st.write("Define Manual Bandpass Frequencies:")
             c_freq1, c_freq2 = st.columns(2)
             with c_freq1: 
                 low_dft = st.number_input("Bandpass Low Cut (Hz)", min_value=0.1, value=5.0, step=0.5)
             with c_freq2: 
                 high_dft = st.number_input("Bandpass High Cut (Hz)", min_value=1.0, value=15.0, step=1.0)
             
+            # --- CALCULATE DFT FOR VISUALIZATION (RESTORED) ---
+            xf_p, yf_p, _ = calculate_dft(st.session_state.p_data, fs_est)
+            xf_qrs, yf_qrs, _ = calculate_dft(st.session_state.qrs_data, fs_est)
+            xf_t, yf_t, _ = calculate_dft(st.session_state.t_data, fs_est)
+
+            # --- PLOT A: DFT SPECTRUM (RESTORED) ---
+            st.write("#### A. DFT Spectrum (Visualization)")
+            fig_dft, ax_dft = plt.subplots(figsize=(10, 5))
+            if len(xf_p)>0: ax_dft.plot(xf_p, yf_p, label='P', color='blue')
+            if len(xf_qrs)>0: ax_dft.plot(xf_qrs, yf_qrs, label='QRS', color='red')
+            if len(xf_t)>0: ax_dft.plot(xf_t, yf_t, label='T', color='green')
+            
+            # Draw vertical lines to show where the Manual Filter will cut
+            ax_dft.axvline(low_dft, c='k', ls='--', alpha=0.5, label='Manual Bandpass Limits')
+            ax_dft.axvline(high_dft, c='k', ls='--', alpha=0.5)
+            
+            ax_dft.set_xlabel("Frequency (Hz)")
+            ax_dft.set_ylabel("Magnitude")
+            ax_dft.legend()
+            st.pyplot(fig_dft)
+
             # --- PROCESS SEGMENT FILTERS (MANUAL) ---
             p_raw = st.session_state.p_data['Value'].values
             p_filt = manual_bandpass_filter(p_raw, fs_est, low_dft, high_dft)
-            
             qrs_raw = st.session_state.qrs_data['Value'].values
             qrs_filt = manual_bandpass_filter(qrs_raw, fs_est, low_dft, high_dft)
-            
             t_raw = st.session_state.t_data['Value'].values
             t_filt = manual_bandpass_filter(t_raw, fs_est, low_dft, high_dft)
 
             # --- PLOT B: SEGMENT RECONSTRUCTION ---
-            st.write("#### Result of Manual Bandpass on Segments")
+            st.write("#### B. Individual Segment Reconstruction (Manual Filter)")
             fig_rec, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
             
             ax1.set_title("P Wave")
@@ -271,32 +299,11 @@ if file_to_load is not None:
             ax3.plot(st.session_state.t_data['Index'], t_filt, color='green', label='Filtered')
             st.pyplot(fig_rec)
             
-            # --- DFT PLOT (VISUALIZATION ONLY) ---
-            st.write("#### Spectrum Check (Visualization of the Manual Filter)")
-            # Compute DFT of the *Filtered* QRS to see if it worked
-            xf_raw, yf_raw, _ = calculate_dft(st.session_state.qrs_data, fs_est) # Raw Spectrum
-            
-            # Make a dummy dataframe for the filtered data to reuse calculate_dft
-            df_qrs_filt = st.session_state.qrs_data.copy()
-            df_qrs_filt['Value'] = qrs_filt
-            xf_filt, yf_filt, _ = calculate_dft(df_qrs_filt, fs_est) # Filtered Spectrum
-
-            fig_dft, ax_dft = plt.subplots(figsize=(10, 4))
-            ax_dft.plot(xf_raw, yf_raw, color='lightgray', label='Original Spectrum', linestyle='--')
-            ax_dft.plot(xf_filt, yf_filt, color='red', label='Filtered Spectrum (Manual IIR)')
-            ax_dft.axvline(low_dft, c='k', ls=':', alpha=0.5)
-            ax_dft.axvline(high_dft, c='k', ls=':', alpha=0.5)
-            ax_dft.set_title("QRS Spectrum: Before vs After Manual Filter")
-            ax_dft.legend()
-            st.pyplot(fig_dft)
-
             st.markdown("---")
             st.subheader("5. Final Output: Manual Bandpass")
             
             # --- APPLY MANUAL FILTER TO GLOBAL DATA ---
             global_signal = df_processed['Value'].values
-            
-            # This calls the loop-based function defined at the top
             global_filtered = manual_bandpass_filter(global_signal, fs_est, low_dft, high_dft)
             
             df_global_filtered = df_processed.copy()
