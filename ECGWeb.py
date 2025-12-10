@@ -135,7 +135,7 @@ def calculate_dft(df_segment, fs):
 # -----------------------------------------------------------------------------
 # --- MAIN APP ---
 # -----------------------------------------------------------------------------
-st.title("ECG Analysis: Manual Calculations (Full)")
+st.title("ECG Analysis: Manual Calculations (Full Pipeline)")
 
 # 1. Data Load
 st.sidebar.header("1. Data Load")
@@ -252,12 +252,12 @@ if file_to_load is not None:
             with c_freq2: 
                 high_dft = st.number_input("Bandpass High Cut (Hz)", min_value=1.0, value=15.0, step=1.0)
             
-            # --- CALCULATE DFT FOR VISUALIZATION (RESTORED) ---
+            # --- CALCULATE DFT FOR VISUALIZATION ---
             xf_p, yf_p, _ = calculate_dft(st.session_state.p_data, fs_est)
             xf_qrs, yf_qrs, _ = calculate_dft(st.session_state.qrs_data, fs_est)
             xf_t, yf_t, _ = calculate_dft(st.session_state.t_data, fs_est)
 
-            # --- PLOT A: DFT SPECTRUM (RESTORED) ---
+            # --- PLOT A: DFT SPECTRUM ---
             st.write("#### A. DFT Spectrum (Visualization)")
             fig_dft, ax_dft = plt.subplots(figsize=(10, 5))
             if len(xf_p)>0: ax_dft.plot(xf_p, yf_p, label='P', color='blue')
@@ -366,3 +366,52 @@ if file_to_load is not None:
             ax_mav.set_xlim(final_zoom_range) 
             ax_mav.legend()
             st.pyplot(fig_mav)
+
+            # ---------------------------------------------------------
+            # --- SECTION 8: THRESHOLDING (Analog to Digital) ---
+            # ---------------------------------------------------------
+            st.markdown("---")
+            st.subheader("8. Thresholding (Analog to Digital Conversion)")
+            st.write("Mengubah sinyal MAV (Analog) menjadi Sinyal Biner (Digital: 0 atau 1) berdasarkan ambang batas (Threshold).")
+
+            # 1. Determine Max Amplitude for reference
+            max_mav = np.max(global_mav)
+            st.write(f"**Max MAV Amplitude:** {max_mav:.4f}")
+
+            # 2. Slider for Threshold %
+            threshold_perc = st.slider("Set Threshold Level (% of Max)", 0, 100, 40, step=1)
+            threshold_val = max_mav * (threshold_perc / 100.0)
+
+            # 3. Create Binary Signal (Digital)
+            # Jika MAV > Threshold, nilainya 1. Jika tidak, 0.
+            binary_signal = np.where(global_mav > threshold_val, 1, 0)
+
+            # 4. Count Beats (Simple estimation based on rising edges)
+            diff_binary = np.diff(binary_signal, prepend=0)
+            beats_detected = np.count_nonzero(diff_binary == 1)
+            st.metric("Estimasi Detak Jantung (Beats Detected)", beats_detected)
+
+            # 5. Plot Comparison
+            fig_th, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+
+            # Top Plot: Analog (MAV) + Threshold Line
+            ax_top.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Signal')
+            ax_top.axhline(threshold_val, color='black', linestyle='--', label=f'Threshold ({threshold_perc}%)')
+            ax_top.set_title("Analog Signal (MAV) & Threshold")
+            ax_top.set_ylabel("Amplitude")
+            ax_top.grid(True, alpha=0.3)
+            ax_top.legend(loc='upper right')
+
+            # Bottom Plot: Digital (Binary)
+            ax_bot.plot(df_global_filtered['Index'], binary_signal, color='red', label='Digital Pulse', drawstyle='steps-pre')
+            ax_bot.fill_between(df_global_filtered['Index'], binary_signal, step='pre', color='red', alpha=0.3)
+            ax_bot.set_title("Digital Output (Binary)")
+            ax_bot.set_ylabel("Logic State (0/1)")
+            ax_bot.set_xlabel("Time (s)")
+            ax_bot.set_ylim(-0.1, 1.2) # Lock Y axis for 0-1
+            ax_bot.grid(True, alpha=0.3)
+            
+            # Sync zoom with previous plots
+            ax_bot.set_xlim(final_zoom_range) 
+            
+            st.pyplot(fig_th)
