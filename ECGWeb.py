@@ -4,73 +4,47 @@ import pandas as pd
 import numpy as np
 import os
 
-# -----------------------------------------------------------------------------
-# --- 1. MANUAL FILTER FUNCTIONS (TIME DOMAIN - NO LIBRARIES) ---
-# -----------------------------------------------------------------------------
-
 def manual_iir_lowpass(data, cutoff, fs):
-    """
-    Manual implementation of a 1st-order Low Pass Filter using a difference equation.
-    Formula equivalent to an RC circuit simulation.
-    """
     if cutoff <= 0: return data
     n = len(data)
     y = np.zeros(n)
     
-    # Calculate Alpha (smoothing factor) based on RC time constant
     dt = 1.0 / fs
     rc = 1.0 / (2 * np.pi * cutoff)
     alpha = dt / (rc + dt)
     
-    # Initial condition
     y[0] = data[0]
     
-    # Manual Loop (The "Algorithm")
     for i in range(1, n):
         y[i] = alpha * data[i] + (1 - alpha) * y[i-1]
         
     return y
 
 def manual_iir_highpass(data, cutoff, fs):
-    """
-    Manual implementation of a 1st-order High Pass Filter.
-    """
     if cutoff <= 0: return data
     n = len(data)
     y = np.zeros(n)
     
-    # Calculate Alpha
     dt = 1.0 / fs
     rc = 1.0 / (2 * np.pi * cutoff)
     alpha = rc / (rc + dt)
     
     y[0] = 0 
     
-    # Manual Loop
     for i in range(1, n):
         y[i] = alpha * (y[i-1] + data[i] - data[i-1])
         
     return y
 
 def manual_bandpass_filter(data, fs, low_cut, high_cut):
-    """
-    Manual Bandpass = Series of Low Pass + High Pass.
-    No FFT, no scipy. Just math loops.
-    """
-    # 1. Apply Low Pass (Remove High Frequencies, e.g., > 15Hz)
     step1_signal = manual_iir_lowpass(data, high_cut, fs)
-    
-    # 2. Apply High Pass (Remove Low Frequencies, e.g., < 5Hz)
     final_signal = manual_iir_highpass(step1_signal, low_cut, fs)
-    
     return final_signal
 
-# --- HELPER: Moving Average Filter ---
 def moving_average_filter(data, window_size):
     window_size = int(window_size)
     if window_size < 1: return data
     
-    # Manual Convolution for Moving Average
     window = np.ones(window_size) / float(window_size)
     return np.convolve(data, window, 'same')
 
@@ -102,7 +76,6 @@ def create_full_plot(df, x_range=None, raw_df=None):
     ax.legend()
     return fig
 
-# Helper for Visualization Only (Does not affect filtering process)
 @st.cache_data
 def calculate_dft(df_segment, fs):
     N_dft = 200
@@ -132,12 +105,8 @@ def calculate_dft(df_segment, fs):
     if half_N > 0: yf_positive_magnitude[0] = MagDFT[0] / N_orig 
     return xf_positive, yf_positive_magnitude, fs
 
-# -----------------------------------------------------------------------------
-# --- MAIN APP ---
-# -----------------------------------------------------------------------------
 st.title("ECG Analysis: Manual Calculations (Full Pipeline)")
 
-# 1. Data Load
 st.sidebar.header("1. Data Load")
 uploaded_file = st.sidebar.file_uploader("Choose a csv file", type="csv")
 
@@ -152,7 +121,6 @@ if file_to_load is not None:
     df_raw = load_data(file_to_load)
     
     if df_raw is not None:
-        # Calculate FS
         try:
             time_diffs = np.diff(df_raw['Index'])
             fs_est = 1.0 / np.median(time_diffs)
@@ -160,21 +128,18 @@ if file_to_load is not None:
             fs_est = 100.0
         st.sidebar.write(f"**Fs:** {fs_est:.1f} Hz")
         
-        # --- PRE-FILTERING (FULL VERSION RESTORED) ---
         st.sidebar.markdown("---")
         st.sidebar.header("2. Pre-Filtering (Global)")
         
         df_processed = df_raw.copy()
         is_filtered = False
 
-        # 1. High Pass Checkbox
         use_hpf = st.sidebar.checkbox("Enable HPF (Remove Drift)", value=True)
         if use_hpf:
             cutoff_h = st.sidebar.slider("HPF Cutoff (Hz)", 0.1, 5.0, 0.5, step=0.1)
             df_processed['Value'] = manual_iir_highpass(df_processed['Value'].values, cutoff_h, fs_est)
             is_filtered = True
             
-        # 2. Low Pass Checkbox (RESTORED)
         use_lpf = st.sidebar.checkbox("Enable LPF (Remove High Freq)", value=True)
         if use_lpf:
             max_cutoff = float(fs_est / 2.0) - 1.0
@@ -184,19 +149,17 @@ if file_to_load is not None:
 
         raw_for_plot = df_raw if is_filtered else None
             
-        # --- MAIN PREVIEW ---
         st.subheader("1. Data Preview")
         min_time = float(df_processed['Index'].min())
         max_time = float(df_processed['Index'].max())
         
         col1, col2 = st.columns([3, 1])
         with col1:
-             zoom_range = st.slider("Zoom (Time Range)", min_time, max_time, (min_time, max_time))
+              zoom_range = st.slider("Zoom (Time Range)", min_time, max_time, (min_time, max_time))
         
         fig_full = create_full_plot(df_processed, zoom_range, raw_df=raw_for_plot) 
         st.pyplot(fig_full)
 
-        # --- CYCLE SELECTION ---
         st.subheader("2. Select a Single ECG Cycle")
         default_duration = (max_time - min_time) * 0.1
         if default_duration == 0: default_duration = 1.0
@@ -232,7 +195,6 @@ if file_to_load is not None:
             st.session_state.qrs_data = df_cycle[(df_cycle['Index'] >= qrs_range[0]) & (df_cycle['Index'] <= qrs_range[1])]
             st.session_state.t_data = df_cycle[(df_cycle['Index'] >= t_range[0]) & (df_cycle['Index'] <= t_range[1])]
 
-            # Plot Highlight
             fig_hl, ax_hl = plt.subplots(figsize=(10, 4))
             ax_hl.plot(df_cycle['Index'], df_cycle['Value'], 'k', alpha=0.8)
             ax_hl.axvspan(p_range[0], p_range[1], color='blue', alpha=0.2, label='P')
@@ -244,7 +206,6 @@ if file_to_load is not None:
             st.markdown("---")
             st.subheader("4. Segment Analysis")
             
-            # --- FILTER INPUTS ---
             st.write("Define Manual Bandpass Frequencies:")
             c_freq1, c_freq2 = st.columns(2)
             with c_freq1: 
@@ -252,19 +213,16 @@ if file_to_load is not None:
             with c_freq2: 
                 high_dft = st.number_input("Bandpass High Cut (Hz)", min_value=1.0, value=15.0, step=1.0)
             
-            # --- CALCULATE DFT FOR VISUALIZATION ---
             xf_p, yf_p, _ = calculate_dft(st.session_state.p_data, fs_est)
             xf_qrs, yf_qrs, _ = calculate_dft(st.session_state.qrs_data, fs_est)
             xf_t, yf_t, _ = calculate_dft(st.session_state.t_data, fs_est)
 
-            # --- PLOT A: DFT SPECTRUM ---
             st.write("#### A. DFT Spectrum (Visualization)")
             fig_dft, ax_dft = plt.subplots(figsize=(10, 5))
             if len(xf_p)>0: ax_dft.plot(xf_p, yf_p, label='P', color='blue')
             if len(xf_qrs)>0: ax_dft.plot(xf_qrs, yf_qrs, label='QRS', color='red')
             if len(xf_t)>0: ax_dft.plot(xf_t, yf_t, label='T', color='green')
             
-            # Draw vertical lines to show where the Manual Filter will cut
             ax_dft.axvline(low_dft, c='k', ls='--', alpha=0.5, label='Manual Bandpass Limits')
             ax_dft.axvline(high_dft, c='k', ls='--', alpha=0.5)
             
@@ -273,7 +231,6 @@ if file_to_load is not None:
             ax_dft.legend()
             st.pyplot(fig_dft)
 
-            # --- PROCESS SEGMENT FILTERS (MANUAL) ---
             p_raw = st.session_state.p_data['Value'].values
             p_filt = manual_bandpass_filter(p_raw, fs_est, low_dft, high_dft)
             qrs_raw = st.session_state.qrs_data['Value'].values
@@ -281,7 +238,6 @@ if file_to_load is not None:
             t_raw = st.session_state.t_data['Value'].values
             t_filt = manual_bandpass_filter(t_raw, fs_est, low_dft, high_dft)
 
-            # --- PLOT B: SEGMENT RECONSTRUCTION ---
             st.write("#### B. Individual Segment Reconstruction (Manual Filter)")
             fig_rec, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
             
@@ -302,14 +258,12 @@ if file_to_load is not None:
             st.markdown("---")
             st.subheader("5. Final Output: Manual Bandpass")
             
-            # --- APPLY MANUAL FILTER TO GLOBAL DATA ---
             global_signal = df_processed['Value'].values
             global_filtered = manual_bandpass_filter(global_signal, fs_est, low_dft, high_dft)
             
             df_global_filtered = df_processed.copy()
             df_global_filtered['Value'] = global_filtered
             
-            # --- FINAL PLOT CONTROLS ---
             final_min_t = float(df_global_filtered['Index'].min())
             final_max_t = float(df_global_filtered['Index'].max())
             
@@ -323,7 +277,6 @@ if file_to_load is not None:
             fig_global_check = create_full_plot(df_global_filtered, x_range=final_zoom_range, raw_df=None)
             st.pyplot(fig_global_check)
 
-            # --- SECTION 6: SQUARING ---
             st.markdown("---")
             st.subheader("6. Squaring Process")
             st.write("**Function**: $y[n] = (x[n])^2$.")
@@ -340,22 +293,17 @@ if file_to_load is not None:
             ax_sq.legend()
             st.pyplot(fig_sq)
 
-            # --- SECTION 7: MAV ---
             st.markdown("---")
             st.subheader("7. Moving Window Integration (MAV)")
 
-            # 1. Slider
             window_ms = st.slider("Window Width (ms)", 10, 400, 150, step=10)
             
-            # 2. Conversion
             window_samples = int(window_ms * fs_est / 1000.0)
             if window_samples < 1: window_samples = 1
             st.write(f"Window size: {window_ms} ms (~{window_samples} samples)")
 
-            # 3. Apply MAV
             global_mav = moving_average_filter(global_squared, window_samples)
 
-            # 4. Plot MAV
             fig_mav, ax_mav = plt.subplots(figsize=(10, 6))
             ax_mav.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Output', linewidth=1.5)
             
@@ -367,34 +315,24 @@ if file_to_load is not None:
             ax_mav.legend()
             st.pyplot(fig_mav)
 
-            # ---------------------------------------------------------
-            # --- SECTION 8: THRESHOLDING (Analog to Digital) ---
-            # ---------------------------------------------------------
             st.markdown("---")
             st.subheader("8. Thresholding (Analog to Digital Conversion)")
             st.write("Mengubah sinyal MAV (Analog) menjadi Sinyal Biner (Digital: 0 atau 1) berdasarkan ambang batas (Threshold).")
 
-            # 1. Determine Max Amplitude for reference
             max_mav = np.max(global_mav)
             st.write(f"**Max MAV Amplitude:** {max_mav:.4f}")
 
-            # 2. Slider for Threshold %
             threshold_perc = st.slider("Set Threshold Level (% of Max)", 0, 100, 40, step=1)
             threshold_val = max_mav * (threshold_perc / 100.0)
 
-            # 3. Create Binary Signal (Digital)
-            # Jika MAV > Threshold, nilainya 1. Jika tidak, 0.
             binary_signal = np.where(global_mav > threshold_val, 1, 0)
 
-            # 4. Count Beats (Simple estimation based on rising edges)
             diff_binary = np.diff(binary_signal, prepend=0)
             beats_detected = np.count_nonzero(diff_binary == 1)
             st.metric("Estimasi Detak Jantung (Beats Detected)", beats_detected)
 
-            # 5. Plot Comparison
             fig_th, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
-            # Top Plot: Analog (MAV) + Threshold Line
             ax_top.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Signal')
             ax_top.axhline(threshold_val, color='black', linestyle='--', label=f'Threshold ({threshold_perc}%)')
             ax_top.set_title("Analog Signal (MAV) & Threshold")
@@ -402,16 +340,14 @@ if file_to_load is not None:
             ax_top.grid(True, alpha=0.3)
             ax_top.legend(loc='upper right')
 
-            # Bottom Plot: Digital (Binary)
             ax_bot.plot(df_global_filtered['Index'], binary_signal, color='red', label='Digital Pulse', drawstyle='steps-pre')
             ax_bot.fill_between(df_global_filtered['Index'], binary_signal, step='pre', color='red', alpha=0.3)
             ax_bot.set_title("Digital Output (Binary)")
             ax_bot.set_ylabel("Logic State (0/1)")
             ax_bot.set_xlabel("Time (s)")
-            ax_bot.set_ylim(-0.1, 1.2) # Lock Y axis for 0-1
+            ax_bot.set_ylim(-0.1, 1.2)
             ax_bot.grid(True, alpha=0.3)
             
-            # Sync zoom with previous plots
             ax_bot.set_xlim(final_zoom_range) 
             
             st.pyplot(fig_th)
