@@ -278,46 +278,37 @@ if file_to_load is not None:
             st.pyplot(fig_global_check)
 
             st.markdown("---")
-            st.subheader("6. Squaring Process")
-            st.write("**Function**: $y[n] = (x[n])^2$.")
+            st.subheader("6 & 7. Squaring vs. MAV Integration")
 
             global_squared = global_filtered ** 2
 
-            fig_sq, ax_sq = plt.subplots(figsize=(10, 6))
-            ax_sq.plot(df_global_filtered['Index'], global_squared, color='#800080', label='Squared Signal', linewidth=1.2)
-            ax_sq.set_title('Squaring Result')
-            ax_sq.set_ylabel('Amplitude ($mV^2$)') 
-            ax_sq.set_xlabel('Time (s)')
-            ax_sq.grid(True, alpha=0.3)
-            ax_sq.set_xlim(final_zoom_range)
-            ax_sq.legend()
-            st.pyplot(fig_sq)
-
-            st.markdown("---")
-            st.subheader("7. Moving Window Integration (MAV)")
-
-            window_ms = st.slider("Window Width (ms)", 10, 400, 150, step=10)
-            
+            window_ms = st.slider("MAV Window Width (ms)", 10, 400, 150, step=10)
             window_samples = int(window_ms * fs_est / 1000.0)
             if window_samples < 1: window_samples = 1
-            st.write(f"Window size: {window_ms} ms (~{window_samples} samples)")
-
+            st.write(f"Window size: {window_samples} samples")
+            
             global_mav = moving_average_filter(global_squared, window_samples)
 
-            fig_mav, ax_mav = plt.subplots(figsize=(10, 6))
-            ax_mav.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Output', linewidth=1.5)
+            fig_compare, (ax_sq, ax_mav) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
             
-            ax_mav.set_title('Moving Window Integration Result')
+            ax_sq.plot(df_global_filtered['Index'], global_squared, color='#800080', label='Squared Signal', linewidth=1)
+            ax_sq.set_title('Step 1: Squaring Process (Energy)')
+            ax_sq.set_ylabel('Amplitude ($mV^2$)')
+            ax_sq.grid(True, alpha=0.3)
+            ax_sq.legend(loc="upper right")
+            
+            ax_mav.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Output', linewidth=1.5)
+            ax_mav.set_title('Step 2: Moving Window Integration')
             ax_mav.set_ylabel('Amplitude (Integrated)')
             ax_mav.set_xlabel('Time (s)')
             ax_mav.grid(True, alpha=0.3)
-            ax_mav.set_xlim(final_zoom_range) 
-            ax_mav.legend()
-            st.pyplot(fig_mav)
+            ax_mav.legend(loc="upper right")
+
+            ax_mav.set_xlim(final_zoom_range)
+            st.pyplot(fig_compare)
 
             st.markdown("---")
             st.subheader("8. Thresholding (Analog to Digital Conversion)")
-            st.write("Mengubah sinyal MAV (Analog) menjadi Sinyal Biner (Digital: 0 atau 1) berdasarkan ambang batas (Threshold).")
 
             max_mav = np.max(global_mav)
             st.write(f"**Max MAV Amplitude:** {max_mav:.4f}")
