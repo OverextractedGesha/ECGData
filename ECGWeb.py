@@ -159,7 +159,7 @@ def calculate_dft(df_segment, fs):
     if half_N > 0: yf_positive_magnitude[0] = MagDFT[0] / N_orig 
     return xf_positive, yf_positive_magnitude, fs
 
-st.title("ECG Analysis: Manual Calculations (Full Pipeline)")
+st.title("ECG Analysis")
 
 st.sidebar.header("1. Data Load")
 uploaded_file = st.sidebar.file_uploader("Choose a csv file", type="csv")
@@ -203,7 +203,7 @@ if file_to_load is not None:
 
         raw_for_plot = df_raw if is_filtered else None
             
-        st.subheader("1. Data Preview")
+        st.subheader("Data Preview")
         min_time = float(df_processed['Index'].min())
         max_time = float(df_processed['Index'].max())
         
@@ -214,7 +214,7 @@ if file_to_load is not None:
         fig_full = create_full_plot(df_processed, zoom_range, raw_df=raw_for_plot) 
         st.pyplot(fig_full)
 
-        st.subheader("2. Select a Single ECG Cycle")
+        st.subheader("Select a Single ECG Cycle")
         default_duration = (max_time - min_time) * 0.1
         if default_duration == 0: default_duration = 1.0
         default_start = min_time
@@ -239,7 +239,7 @@ if file_to_load is not None:
             end_index = st.session_state.end_index
             df_cycle = df_processed[(df_processed['Index'] >= start_index) & (df_processed['Index'] <= end_index)].copy()
 
-            st.subheader("3. Identify Complexes")
+            st.subheader("Identify Complexes")
             dur = end_index - start_index
             p_range = st.slider("P Wave", start_index, end_index, (start_index, start_index + dur*0.15), step=0.01)
             qrs_range = st.slider("QRS Complex", start_index, end_index, (start_index + dur*0.2, start_index + dur*0.4), step=0.01)
@@ -258,7 +258,7 @@ if file_to_load is not None:
             st.pyplot(fig_hl)
 
             st.markdown("---")
-            st.subheader("4. Segment Analysis")
+            st.subheader("Segment Analysis")
             
             st.write("Define Manual Bandpass Frequencies:")
             c_freq1, c_freq2 = st.columns(2)
@@ -271,7 +271,7 @@ if file_to_load is not None:
             xf_qrs, yf_qrs, _ = calculate_dft(st.session_state.qrs_data, fs_est)
             xf_t, yf_t, _ = calculate_dft(st.session_state.t_data, fs_est)
 
-            st.write("#### A. DFT Spectrum (Visualization)")
+            st.write("DFT Spectrum")
             fig_dft, ax_dft = plt.subplots(figsize=(10, 5))
             if len(xf_p)>0: ax_dft.plot(xf_p, yf_p, label='P', color='blue')
             if len(xf_qrs)>0: ax_dft.plot(xf_qrs, yf_qrs, label='QRS', color='red')
@@ -292,7 +292,7 @@ if file_to_load is not None:
             t_raw = st.session_state.t_data['Value'].values
             t_filt = manual_bandpass_filter(t_raw, fs_est, low_dft, high_dft)
 
-            st.write("#### B. Individual Segment Reconstruction (Manual Filter)")
+            st.write("Individual Segment Reconstruction")
             fig_rec, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
             
             ax1.set_title("P Wave")
@@ -310,7 +310,7 @@ if file_to_load is not None:
             st.pyplot(fig_rec)
             
             st.markdown("---")
-            st.subheader("5. Final Output: Manual Bandpass")
+            st.subheader("Manual Bandpass")
             
             global_signal = df_processed['Value'].values
             global_filtered = manual_bandpass_filter(global_signal, fs_est, low_dft, high_dft)
@@ -332,7 +332,7 @@ if file_to_load is not None:
             st.pyplot(fig_global_check)
 
             st.markdown("---")
-            st.subheader("6 & 7. Squaring & MAV Integration (Combined)")
+            st.subheader("Squaring & MAV")
 
             global_squared = manual_square_signal(global_filtered)
 
@@ -358,7 +358,7 @@ if file_to_load is not None:
             st.pyplot(fig_compare)
 
             st.markdown("---")
-            st.subheader("8. Thresholding (Analog to Digital Conversion)")
+            st.subheader("Thresholding")
 
             max_mav = np.max(global_mav) 
             st.write(f"**Max MAV Amplitude:** {max_mav:.4f}")
@@ -390,3 +390,4 @@ if file_to_load is not None:
             ax_bot.set_xlim(final_zoom_range) 
             
             st.pyplot(fig_th)
+
