@@ -278,7 +278,7 @@ if file_to_load is not None:
             st.pyplot(fig_global_check)
 
             st.markdown("---")
-            st.subheader("6 & 7. Squaring vs. MAV Integration")
+            st.subheader("6 & 7. Squaring & MAV Integration (Combined)")
 
             global_squared = global_filtered ** 2
 
@@ -289,22 +289,18 @@ if file_to_load is not None:
             
             global_mav = moving_average_filter(global_squared, window_samples)
 
-            fig_compare, (ax_sq, ax_mav) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+            fig_compare, ax_comb = plt.subplots(figsize=(10, 6))
             
-            ax_sq.plot(df_global_filtered['Index'], global_squared, color='#800080', label='Squared Signal', linewidth=1)
-            ax_sq.set_title('Step 1: Squaring Process (Energy)')
-            ax_sq.set_ylabel('Amplitude ($mV^2$)')
-            ax_sq.grid(True, alpha=0.3)
-            ax_sq.legend(loc="upper right")
+            ax_comb.plot(df_global_filtered['Index'], global_squared, color='#800080', label='Squared Signal', alpha=0.3, linewidth=1)
+            ax_comb.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Output', alpha=1.0, linewidth=2)
             
-            ax_mav.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Output', linewidth=1.5)
-            ax_mav.set_title('Step 2: Moving Window Integration')
-            ax_mav.set_ylabel('Amplitude (Integrated)')
-            ax_mav.set_xlabel('Time (s)')
-            ax_mav.grid(True, alpha=0.3)
-            ax_mav.legend(loc="upper right")
-
-            ax_mav.set_xlim(final_zoom_range)
+            ax_comb.set_title('Squaring (Low Opacity) vs MAV (Solid)')
+            ax_comb.set_ylabel('Amplitude')
+            ax_comb.set_xlabel('Time (s)')
+            ax_comb.grid(True, alpha=0.3)
+            ax_comb.legend(loc="upper right")
+            ax_comb.set_xlim(final_zoom_range)
+            
             st.pyplot(fig_compare)
 
             st.markdown("---")
