@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import os
 
+# --- 1. Filter Functions ---
 def manual_iir_lowpass(data, cutoff, fs):
     if cutoff <= 0: return data
     n = len(data)
@@ -48,6 +49,7 @@ def moving_average_filter(data, window_size):
     window = np.ones(window_size) / float(window_size)
     return np.convolve(data, window, 'same')
 
+# --- 2. Data Loading & Plotting Helpers ---
 @st.cache_data
 def load_data(file_path_or_buffer):
     try:
@@ -105,6 +107,7 @@ def calculate_dft(df_segment, fs):
     if half_N > 0: yf_positive_magnitude[0] = MagDFT[0] / N_orig 
     return xf_positive, yf_positive_magnitude, fs
 
+# --- 3. Main Streamlit Application ---
 st.title("ECG Analysis: Manual Calculations (Full Pipeline)")
 
 st.sidebar.header("1. Data Load")
@@ -121,6 +124,7 @@ if file_to_load is not None:
     df_raw = load_data(file_to_load)
     
     if df_raw is not None:
+        # Estimate Fs
         try:
             time_diffs = np.diff(df_raw['Index'])
             fs_est = 1.0 / np.median(time_diffs)
@@ -305,6 +309,12 @@ if file_to_load is not None:
             global_mav = moving_average_filter(global_squared, window_samples)
 
             fig_mav, ax_mav = plt.subplots(figsize=(10, 6))
+            
+            # --- MODIFICATION: Plot Squared Signal in Background ---
+            ax_mav.plot(df_global_filtered['Index'], global_squared, 
+                        color='#800080', alpha=0.25, linewidth=1, label='Squared Signal (Background)')
+            # -----------------------------------------------------
+
             ax_mav.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Output', linewidth=1.5)
             
             ax_mav.set_title('Moving Window Integration Result')
