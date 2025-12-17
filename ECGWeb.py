@@ -4,6 +4,65 @@ import pandas as pd
 import numpy as np
 import os
 
+def manual_mean(data):
+    total = 0.0
+    count = 0
+    for x in data:
+        total += x
+        count += 1
+    if count == 0: return 0.0
+    return total / count
+
+def manual_square_signal(data):
+    n = len(data)
+    y = np.zeros(n)
+    for i in range(n):
+        y[i] = data[i] * data[i]
+    return y
+
+def manual_moving_average_filter(data, window_size):
+    n = len(data)
+    window_size = int(window_size)
+    if window_size < 1: return data
+    
+    y = np.zeros(n)
+    offset = window_size // 2 
+    
+    for i in range(n):
+        current_sum = 0.0
+        
+        start_idx = i - offset
+        
+        for j in range(window_size):
+            data_idx = start_idx + j
+            
+            if 0 <= data_idx < n:
+                current_sum += data[data_idx]
+        
+        y[i] = current_sum / window_size
+        
+    return y
+
+def manual_threshold_and_count(data, threshold):
+    n = len(data)
+    binary_signal = np.zeros(n)
+    beats_count = 0
+    
+    for i in range(n):
+        if data[i] > threshold:
+            binary_signal[i] = 1.0
+        else:
+            binary_signal[i] = 0.0
+            
+    for i in range(1, n):
+        prev = binary_signal[i-1]
+        curr = binary_signal[i]
+        
+        if prev == 0 and curr == 1:
+            beats_count += 1
+            
+    return binary_signal, beats_count
+
 def manual_iir_lowpass(data, cutoff, fs):
     if cutoff <= 0: return data
     n = len(data)
@@ -41,13 +100,6 @@ def manual_bandpass_filter(data, fs, low_cut, high_cut):
     final_signal = manual_iir_highpass(step1_signal, low_cut, fs)
     return final_signal
 
-def moving_average_filter(data, window_size):
-    window_size = int(window_size)
-    if window_size < 1: return data
-    
-    window = np.ones(window_size) / float(window_size)
-    return np.convolve(data, window, 'same')
-
 @st.cache_data
 def load_data(file_path_or_buffer):
     try:
@@ -83,7 +135,9 @@ def calculate_dft(df_segment, fs):
     N_orig = len(original_signal)
     if N_orig < 2: return np.array([]), np.array([]), 0
 
-    x_detrended = original_signal - np.mean(original_signal)
+    mean_val = manual_mean(original_signal)
+    x_detrended = original_signal - mean_val
+    
     x_padded = np.zeros(N_dft)
     points_to_copy = min(N_orig, N_dft)
     x_padded[0:points_to_copy] = x_detrended[0:points_to_copy]
@@ -280,14 +334,14 @@ if file_to_load is not None:
             st.markdown("---")
             st.subheader("6 & 7. Squaring & MAV Integration (Combined)")
 
-            global_squared = global_filtered ** 2
+            global_squared = manual_square_signal(global_filtered)
 
             window_ms = st.slider("MAV Window Width (ms)", 10, 400, 150, step=10)
             window_samples = int(window_ms * fs_est / 1000.0)
             if window_samples < 1: window_samples = 1
             st.write(f"Window size: {window_samples} samples")
             
-            global_mav = moving_average_filter(global_squared, window_samples)
+            global_mav = manual_moving_average_filter(global_squared, window_samples)
 
             fig_compare, ax_comb = plt.subplots(figsize=(10, 6))
             
@@ -306,16 +360,14 @@ if file_to_load is not None:
             st.markdown("---")
             st.subheader("8. Thresholding (Analog to Digital Conversion)")
 
-            max_mav = np.max(global_mav)
+            max_mav = np.max(global_mav) 
             st.write(f"**Max MAV Amplitude:** {max_mav:.4f}")
 
             threshold_perc = st.slider("Set Threshold Level (% of Max)", 0, 100, 40, step=1)
             threshold_val = max_mav * (threshold_perc / 100.0)
 
-            binary_signal = np.where(global_mav > threshold_val, 1, 0)
-
-            diff_binary = np.diff(binary_signal, prepend=0)
-            beats_detected = np.count_nonzero(diff_binary == 1)
+            binary_signal, beats_detected = manual_threshold_and_count(global_mav, threshold_val)
+            
             st.metric("Estimasi Detak Jantung (Beats Detected)", beats_detected)
 
             fig_th, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
