@@ -87,7 +87,23 @@ def design_fir_coeffs(N, fs, f_low, f_high):
     return h
 
 def manual_bandpass_filter_fir(data, coeffs):
-    return np.convolve(data, coeffs, mode='same')
+    n_data = len(data)
+    n_coeffs = len(coeffs)
+    y = np.zeros(n_data)
+    
+    offset = n_coeffs // 2
+    
+    for i in range(n_data):
+        sum_val = 0.0
+        for j in range(n_coeffs):
+            data_idx = i - j + offset
+            
+            if 0 <= data_idx < n_data:
+                sum_val += data[data_idx] * coeffs[j]
+        
+        y[i] = sum_val
+        
+    return y
 
 @st.cache_data
 def calculate_dft(df_segment, fs):
