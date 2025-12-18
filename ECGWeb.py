@@ -331,6 +331,37 @@ if file_to_load is not None:
             fig_global_check = create_full_plot(df_global_filtered, x_range=final_zoom_range, raw_df=None)
             st.pyplot(fig_global_check)
 
+            # --- NEW FREQUENCY RESPONSE PLOT USING DFT FUNCTION ---
+            st.write(f"**BPF Frequency Response Check ({low_dft}Hz - {high_dft}Hz)**")
+            
+            # 1. Create Impulse
+            # We generate 200 samples to match the calculate_dft function's hardcoded N_dft
+            N_imp = 200
+            impulse = np.zeros(N_imp)
+            impulse[0] = 1.0 
+            
+            # 2. Run impulse through the filter
+            imp_response = manual_bandpass_filter(impulse, fs_est, low_dft, high_dft)
+            
+            # 3. Create a temporary DataFrame because calculate_dft expects one
+            df_imp = pd.DataFrame({'Value': imp_response, 'Index': np.arange(N_imp)/fs_est})
+            
+            # 4. Use the manual calculate_dft function
+            xf_response, yf_response, _ = calculate_dft(df_imp, fs_est)
+            
+            # 5. Plot
+            fig_freq, ax_freq = plt.subplots(figsize=(10, 4))
+            ax_freq.plot(xf_response, yf_response, color='purple', linewidth=1.5, label='DFT of Impulse Response')
+            ax_freq.set_title(f"Simulated Frequency Response")
+            ax_freq.set_xlabel("Frequency (Hz)")
+            ax_freq.set_ylabel("Gain (Magnitude)")
+            ax_freq.axvline(low_dft, color='k', linestyle='--', alpha=0.5, label='Low Cutoff')
+            ax_freq.axvline(high_dft, color='k', linestyle='--', alpha=0.5, label='High Cutoff')
+            ax_freq.set_xlim(0, max(high_dft * 2, 50)) 
+            ax_freq.grid(True, alpha=0.3)
+            ax_freq.legend()
+            st.pyplot(fig_freq)
+
             st.markdown("---")
             st.subheader("Squaring & MAV")
 
@@ -358,7 +389,7 @@ if file_to_load is not None:
             st.pyplot(fig_compare)
 
             st.markdown("---")
-            st.subheader("Thresholding & BPM Calculation")
+            st.subheader("Thresholding & BPM Calculation (Segment)")
 
             st.write("Select the time range to analyze:")
             min_t = float(df_global_filtered['Index'].min())
@@ -375,7 +406,6 @@ if file_to_load is not None:
             segment_mav = global_mav[mask]
             segment_time = df_global_filtered['Index'][mask]
 
-            # --- Changed from Global Max to Segment Max ---
             if len(segment_mav) > 0:
                 max_mav_segment = np.max(segment_mav)
             else:
@@ -414,4 +444,3 @@ if file_to_load is not None:
             ax_bot.grid(True, alpha=0.3)
             
             st.pyplot(fig_th)
-
