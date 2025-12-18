@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import os
 
-# --- 1. Basic Math Helpers ---
 def manual_mean(data):
     total = 0.0
     count = 0
@@ -15,7 +14,6 @@ def manual_mean(data):
     return total / count
 
 def manual_square_signal(data):
-    # Original loop implementation
     n = len(data)
     y = np.zeros(n)
     for i in range(n):
@@ -27,7 +25,6 @@ def manual_moving_average_filter(data, window_size):
     window_size = int(window_size)
     if window_size < 1: return data
     y = np.zeros(n)
-    # Optimized convolution for speed (equivalent to loop)
     kernel = np.ones(window_size) / window_size
     y = np.convolve(data, kernel, mode='same')
     return y
@@ -48,7 +45,6 @@ def manual_threshold_and_count(data, threshold):
             beats_count += 1
     return binary_signal, beats_count
 
-# --- 2. IIR Filters (Pre-Filtering) ---
 def manual_iir_lowpass(data, cutoff, fs):
     if cutoff <= 0: return data
     n = len(data)
@@ -73,7 +69,6 @@ def manual_iir_highpass(data, cutoff, fs):
         y[i] = alpha * (y[i-1] + data[i] - data[i-1])
     return y
 
-# --- 3. FIR Filter Logic (Rectangular Window) ---
 def sinc_func(x):
     if x == 0: return 1.0
     return np.sin(np.pi * x) / (np.pi * x)
@@ -94,7 +89,6 @@ def design_fir_coeffs(N, fs, f_low, f_high):
 def manual_bandpass_filter_fir(data, coeffs):
     return np.convolve(data, coeffs, mode='same')
 
-# --- 4. DFT Helpers ---
 @st.cache_data
 def calculate_dft(df_segment, fs):
     N_dft = 200
@@ -127,7 +121,6 @@ def calculate_dft(df_segment, fs):
     return xf_positive, yf_positive_magnitude, fs
 
 def calculate_dft_response(coeffs, fs, num_points=1000):
-    # --- MANUAL DFT CALCULATION (No FFT Libraries) ---
     N_h = len(coeffs)
     half_points = num_points // 2
     
@@ -146,7 +139,6 @@ def calculate_dft_response(coeffs, fs, num_points=1000):
         magnitude[k] = np.sqrt(real_sum**2 + imag_sum**2)
     return freqs, magnitude
 
-# --- 5. Plotting Helper ---
 @st.cache_data
 def load_data(file_path_or_buffer):
     try:
@@ -173,7 +165,6 @@ def create_full_plot(df, x_range=None, raw_df=None):
     ax.legend()
     return fig
 
-# --- 6. Main App ---
 st.title("ECG Analysis")
 
 st.sidebar.header("1. Data Load")
@@ -192,7 +183,6 @@ if file_to_load is not None:
             fs_est = 100.0
         st.sidebar.write(f"**Fs:** {fs_est:.1f} Hz")
         
-        # --- GLOBAL PRE-FILTERING ---
         st.sidebar.markdown("---")
         st.sidebar.header("2. Pre-Filtering (Global)")
         
@@ -278,10 +268,8 @@ if file_to_load is not None:
             with c_freq2: 
                 high_dft = st.number_input("High Cutoff (Hz)", min_value=1.0, value=15.0, step=1.0)
             with c_ord:
-                # --- CHANGE: Set min_value to 1 ---
-                fir_order = st.number_input("Filter Order (N)", min_value=1, value=5, step=1)
+                fir_order = st.slider("Filter Order (N)", min_value=1, max_value=101, value=5, step=2)
 
-            # Calculate FIR Coefficients
             coeffs = design_fir_coeffs(fir_order, fs_est, low_dft, high_dft)
 
             xf_p, yf_p, _ = calculate_dft(st.session_state.p_data, fs_est)
@@ -300,7 +288,6 @@ if file_to_load is not None:
             ax_dft.legend()
             st.pyplot(fig_dft)
 
-            # Apply FIR Filter
             p_raw = st.session_state.p_data['Value'].values
             p_filt = manual_bandpass_filter_fir(p_raw, coeffs)
             qrs_raw = st.session_state.qrs_data['Value'].values
@@ -325,7 +312,6 @@ if file_to_load is not None:
             st.markdown("---")
             st.subheader("Manual Bandpass (Global Result)")
             
-            # This takes the Pre-Filtered data (IIR) and applies Bandpass (FIR)
             global_signal = df_processed['Value'].values
             global_filtered = manual_bandpass_filter_fir(global_signal, coeffs)
             
@@ -339,23 +325,19 @@ if file_to_load is not None:
             fig_global_check = create_full_plot(df_global_filtered, x_range=final_zoom_range, raw_df=None)
             st.pyplot(fig_global_check)
 
-            # --- MAGNITUDE FREQUENCY RESPONSE PLOT ---
             st.markdown("---")
             st.subheader("Magnitude Frequency Response")
             
-            # Calculate response for plotting using manual function
             freqs, mag = calculate_dft_response(coeffs, fs_est)
             
             fig_freq, ax_freq = plt.subplots(figsize=(10, 5))
             ax_freq.plot(freqs, mag, color='blue', linewidth=2)
             
-            # Formatting to match requested look
             ax_freq.set_title(f"Magnitude Frequency Response (N={fir_order}, Rectangular)", fontsize=12)
             ax_freq.set_xlabel("Frequency (Hz)")
             ax_freq.set_ylabel("Magnitude")
-            ax_freq.set_xlim(0, fs_est / 2) # Show up to Nyquist
+            ax_freq.set_xlim(0, fs_est / 2) 
             
-            # Vertical lines for cutoffs
             ax_freq.axvline(low_dft, color='red', linestyle='--', alpha=0.5, label=f'Low ({low_dft}Hz)')
             ax_freq.axvline(high_dft, color='red', linestyle='--', alpha=0.5, label=f'High ({high_dft}Hz)')
             
@@ -377,10 +359,8 @@ if file_to_load is not None:
 
             fig_compare, ax_comb = plt.subplots(figsize=(10, 6))
             
-            # Plot 1: Squared Signal (Purple, Transparent)
             ax_comb.plot(df_global_filtered['Index'], global_squared, color='purple', label='Squared Signal', linewidth=1.5, alpha=0.3)
             
-            # Plot 2: MAV Signal (Orange, Solid)
             ax_comb.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Output', linewidth=2.0)
             
             ax_comb.set_title('Squaring (Low Opacity) vs MAV (Solid)')
@@ -451,4 +431,3 @@ if file_to_load is not None:
             ax_bot.grid(True, alpha=0.3)
             
             st.pyplot(fig_th)
-
