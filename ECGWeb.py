@@ -159,6 +159,9 @@ def calculate_dft_response(coeffs, fs, num_points=1000):
 def load_data(file_path_or_buffer):
     try:
         df = pd.read_csv(file_path_or_buffer, header=None)
+        # FIX: Ensure we only take the first two columns if there are extra ones
+        if df.shape[1] > 2:
+            df = df.iloc[:, :2]
         df.columns = ['Index', 'Value']
         return df
     except Exception as e:
