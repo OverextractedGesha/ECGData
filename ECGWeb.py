@@ -128,36 +128,22 @@ def calculate_dft(df_segment, fs):
 
 def calculate_dft_response(coeffs, fs, num_points=1000):
     # --- MANUAL DFT CALCULATION (No FFT Libraries) ---
-    # We calculate the Frequency Response H(w) at specific frequency points
-    
     N_h = len(coeffs)
     half_points = num_points // 2
     
     freqs = np.zeros(half_points)
     magnitude = np.zeros(half_points)
     
-    # Iterate over frequency bins k (from 0 to Nyquist)
     for k in range(half_points):
-        
-        # Determine the physical frequency for this bin
-        # Corresponds to w = 2*pi*k / num_points
         freq_hz = k * fs / num_points
         freqs[k] = freq_hz
-        
         real_sum = 0.0
         imag_sum = 0.0
-        
-        # Iterate over filter coefficients h[n]
         for n in range(N_h):
             angle = 2 * np.pi * k * n / num_points
-            
-            # Euler's Formula: h[n] * e^(-j*angle)
             real_sum += coeffs[n] * np.cos(angle)
             imag_sum -= coeffs[n] * np.sin(angle)
-            
-        # Magnitude = sqrt(Real^2 + Imag^2)
         magnitude[k] = np.sqrt(real_sum**2 + imag_sum**2)
-        
     return freqs, magnitude
 
 # --- 5. Plotting Helper ---
@@ -292,7 +278,7 @@ if file_to_load is not None:
             with c_freq2: 
                 high_dft = st.number_input("High Cutoff (Hz)", min_value=1.0, value=15.0, step=1.0)
             with c_ord:
-                fir_order = st.number_input("Filter Order (N)", min_value=1, value=5, step=2)
+                fir_order = st.number_input("Filter Order (N)", min_value=3, value=5, step=2)
 
             # Calculate FIR Coefficients
             coeffs = design_fir_coeffs(fir_order, fs_est, low_dft, high_dft)
@@ -377,7 +363,7 @@ if file_to_load is not None:
             st.pyplot(fig_freq)
 
             st.markdown("---")
-            st.subheader("6. Squaring Process")
+            st.subheader("6. Squaring Process & MAV Overlay")
             st.latex(r"y[n] = (x[n])^2")
 
             global_squared = manual_square_signal(global_filtered)
@@ -390,9 +376,13 @@ if file_to_load is not None:
 
             fig_compare, ax_comb = plt.subplots(figsize=(10, 6))
             
-            ax_comb.plot(df_global_filtered['Index'], global_squared, color='purple', label='Squared Signal', linewidth=1.5)
+            # Plot 1: Squared Signal (Purple, Transparent)
+            ax_comb.plot(df_global_filtered['Index'], global_squared, color='purple', label='Squared Signal', linewidth=1.5, alpha=0.3)
             
-            ax_comb.set_title('Squaring Result')
+            # Plot 2: MAV Signal (Orange, Solid)
+            ax_comb.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Output', linewidth=2.0)
+            
+            ax_comb.set_title('Squaring (Low Opacity) vs MAV (Solid)')
             ax_comb.set_ylabel('Amplitude (mV²)')
             ax_comb.set_xlabel('Time (s)')
             ax_comb.grid(True, alpha=0.3)
@@ -460,4 +450,3 @@ if file_to_load is not None:
             ax_bot.grid(True, alpha=0.3)
             
             st.pyplot(fig_th)
-
