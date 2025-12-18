@@ -15,14 +15,19 @@ def manual_mean(data):
     return total / count
 
 def manual_square_signal(data):
-    # Squares the signal. Result is strictly positive.
-    return data ** 2
+    # Reverted to original loop implementation
+    n = len(data)
+    y = np.zeros(n)
+    for i in range(n):
+        y[i] = data[i] * data[i]
+    return y
 
 def manual_moving_average_filter(data, window_size):
     n = len(data)
     window_size = int(window_size)
     if window_size < 1: return data
     y = np.zeros(n)
+    # Optimized convolution for speed (equivalent to loop)
     kernel = np.ones(window_size) / window_size
     y = np.convolve(data, kernel, mode='same')
     return y
@@ -262,8 +267,7 @@ if file_to_load is not None:
             with c_freq2: 
                 high_dft = st.number_input("High Cutoff (Hz)", min_value=1.0, value=15.0, step=1.0)
             with c_ord:
-                # Set default to 5 to match Homework, user can increase for better filtering
-                fir_order = st.number_input("Filter Order (N)", min_value=1, value=5, step=2)
+                fir_order = st.number_input("Filter Order (N)", min_value=3, value=5, step=2)
 
             # Calculate FIR Coefficients
             coeffs = design_fir_coeffs(fir_order, fs_est, low_dft, high_dft)
@@ -327,19 +331,16 @@ if file_to_load is not None:
             st.markdown("---")
             st.subheader("Magnitude Frequency Response")
             
-            # Calculate response for plotting
             freqs, mag = calculate_dft_response(coeffs, fs_est)
             
             fig_freq, ax_freq = plt.subplots(figsize=(10, 5))
             ax_freq.plot(freqs, mag, color='blue', linewidth=2)
             
-            # Formatting to match requested look
             ax_freq.set_title(f"Magnitude Frequency Response (N={fir_order}, Rectangular)", fontsize=12)
             ax_freq.set_xlabel("Frequency (Hz)")
             ax_freq.set_ylabel("Magnitude")
-            ax_freq.set_xlim(0, fs_est / 2) # Show up to Nyquist
+            ax_freq.set_xlim(0, fs_est / 2) 
             
-            # Vertical lines for cutoffs
             ax_freq.axvline(low_dft, color='red', linestyle='--', alpha=0.5, label=f'Low ({low_dft}Hz)')
             ax_freq.axvline(high_dft, color='red', linestyle='--', alpha=0.5, label=f'High ({high_dft}Hz)')
             
@@ -420,7 +421,7 @@ if file_to_load is not None:
             ax_top.set_ylabel("Amplitude")
             ax_top.legend(loc='upper right')
             ax_top.grid(True, alpha=0.3)
-            ax_top.set_ylim(bottom=0) # Also setting this to 0 for consistency
+            ax_top.set_ylim(bottom=0)
 
             ax_bot.plot(segment_time, binary_segment, color='red', label='Detected Pulse', drawstyle='steps-pre')
             ax_bot.fill_between(segment_time, binary_segment, step='pre', color='red', alpha=0.3)
