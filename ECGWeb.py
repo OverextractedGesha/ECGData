@@ -278,7 +278,8 @@ if file_to_load is not None:
             with c_freq2: 
                 high_dft = st.number_input("High Cutoff (Hz)", min_value=1.0, value=15.0, step=1.0)
             with c_ord:
-                fir_order = st.number_input("Filter Order (N)", min_value=3, value=5, step=2)
+                # --- CHANGE: Set min_value to 1 ---
+                fir_order = st.number_input("Filter Order (N)", min_value=1, value=5, step=2)
 
             # Calculate FIR Coefficients
             coeffs = design_fir_coeffs(fir_order, fs_est, low_dft, high_dft)
