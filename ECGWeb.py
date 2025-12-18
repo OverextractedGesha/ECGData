@@ -319,10 +319,10 @@ if file_to_load is not None:
             fig_global_check = create_full_plot(df_global_filtered, x_range=final_zoom_range, raw_df=None)
             st.pyplot(fig_global_check)
 
-            # --- NEW FREQUENCY RESPONSE PLOT ---
-            st.write(f"**BPF Frequency Response Check ({low_dft}Hz - {high_dft}Hz)**")
+            # --- PLOT: MAGNITUDE FREQUENCY RESPONSE ---
+            st.write(f"**Magnitude Frequency Response ({low_dft}Hz - {high_dft}Hz)**")
             
-            N_imp = 200
+            N_imp = 200 # Must match N_dft in calculate_dft
             impulse = np.zeros(N_imp)
             impulse[0] = 1.0 
             
@@ -332,14 +332,23 @@ if file_to_load is not None:
             
             xf_response, yf_response, _ = calculate_dft(df_imp, fs_est)
             
+            # Normalize for clearer Gain visualization (0 to 1 scale)
+            if len(yf_response) > 0 and np.max(yf_response) > 0:
+                yf_norm = yf_response / np.max(yf_response)
+            else:
+                yf_norm = yf_response
+
             fig_freq, ax_freq = plt.subplots(figsize=(10, 4))
-            ax_freq.plot(xf_response, yf_response, color='purple', linewidth=1.5, label='DFT of Impulse Response')
-            ax_freq.set_title(f"Simulated Frequency Response")
+            ax_freq.plot(xf_response, yf_norm, color='purple', linewidth=1.5, label='Magnitude Response')
+            ax_freq.set_title("Magnitude Frequency Response")
             ax_freq.set_xlabel("Frequency (Hz)")
-            ax_freq.set_ylabel("Gain (Magnitude)")
+            ax_freq.set_ylabel("Normalized Gain (|H(f)|)")
             ax_freq.axvline(low_dft, color='k', linestyle='--', alpha=0.5, label='Low Cutoff')
             ax_freq.axvline(high_dft, color='k', linestyle='--', alpha=0.5, label='High Cutoff')
-            ax_freq.set_xlim(0, max(high_dft * 2, 50)) 
+            
+            # Show full range up to Nyquist (Fs/2)
+            ax_freq.set_xlim(0, fs_est / 2) 
+            
             ax_freq.grid(True, alpha=0.3)
             ax_freq.legend()
             st.pyplot(fig_freq)
@@ -426,4 +435,3 @@ if file_to_load is not None:
             ax_bot.grid(True, alpha=0.3)
             
             st.pyplot(fig_th)
-            
