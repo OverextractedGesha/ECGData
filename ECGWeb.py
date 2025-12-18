@@ -279,7 +279,7 @@ if file_to_load is not None:
                 high_dft = st.number_input("High Cutoff (Hz)", min_value=1.0, value=15.0, step=1.0)
             with c_ord:
                 # --- CHANGE: Set min_value to 1 ---
-                fir_order = st.number_input("Filter Order (N)", min_value=1, value=5, step=2)
+                fir_order = st.number_input("Filter Order (N)", min_value=1, value=5, step=1)
 
             # Calculate FIR Coefficients
             coeffs = design_fir_coeffs(fir_order, fs_est, low_dft, high_dft)
@@ -451,3 +451,4 @@ if file_to_load is not None:
             ax_bot.grid(True, alpha=0.3)
             
             st.pyplot(fig_th)
+
