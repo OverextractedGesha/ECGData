@@ -47,7 +47,32 @@ def manual_threshold_and_count(data, threshold):
             beats_count += 1
     return binary_signal, beats_count
 
-# --- 2. NEW: FIR Filter Logic (Rectangular Window) ---
+# --- 2. IIR Filters (Restored) ---
+def manual_iir_lowpass(data, cutoff, fs):
+    if cutoff <= 0: return data
+    n = len(data)
+    y = np.zeros(n)
+    dt = 1.0 / fs
+    rc = 1.0 / (2 * np.pi * cutoff)
+    alpha = dt / (rc + dt)
+    y[0] = data[0]
+    for i in range(1, n):
+        y[i] = alpha * data[i] + (1 - alpha) * y[i-1]
+    return y
+
+def manual_iir_highpass(data, cutoff, fs):
+    if cutoff <= 0: return data
+    n = len(data)
+    y = np.zeros(n)
+    dt = 1.0 / fs
+    rc = 1.0 / (2 * np.pi * cutoff)
+    alpha = rc / (rc + dt)
+    y[0] = 0 
+    for i in range(1, n):
+        y[i] = alpha * (y[i-1] + data[i] - data[i-1])
+    return y
+
+# --- 3. FIR Filter Logic (Rectangular Window) ---
 def sinc_func(x):
     if x == 0: return 1.0
     return np.sin(np.pi * x) / (np.pi * x)
@@ -69,11 +94,10 @@ def design_fir_coeffs(N, fs, f_low, f_high):
         
     return h
 
-# Replaces the old IIR wrapper
 def manual_bandpass_filter_fir(data, coeffs):
     return np.convolve(data, coeffs, mode='same')
 
-# --- 3. DFT Helpers (UNCHANGED) ---
+# --- 4. DFT Helpers (UNCHANGED) ---
 @st.cache_data
 def calculate_dft(df_segment, fs):
     N_dft = 200
@@ -115,7 +139,7 @@ def calculate_dft_response(coeffs, fs, num_points=1000):
     magnitude = np.abs(fft_response[:half_point])
     return freqs, magnitude
 
-# --- 4. Plotting Helper (UNCHANGED) ---
+# --- 5. Plotting Helper (UNCHANGED) ---
 @st.cache_data
 def load_data(file_path_or_buffer):
     try:
@@ -142,7 +166,7 @@ def create_full_plot(df, x_range=None, raw_df=None):
     ax.legend()
     return fig
 
-# --- 5. Main App ---
+# --- 6. Main App ---
 st.title("ECG Analysis")
 
 st.sidebar.header("1. Data Load")
@@ -161,13 +185,29 @@ if file_to_load is not None:
             fs_est = 100.0
         st.sidebar.write(f"**Fs:** {fs_est:.1f} Hz")
         
-        # --- GLOBAL PRE-FILTERING (Kept simplistic or disabled for pure FIR testing) ---
+        # --- GLOBAL PRE-FILTERING (IIR Restored) ---
         st.sidebar.markdown("---")
         st.sidebar.header("2. Pre-Filtering (Global)")
+        
         df_processed = df_raw.copy()
-        # (We skip IIR Pre-filtering here to focus on the Bandpass section, 
-        # or you can re-enable IIR here if desired. Keeping structure simple.)
-        raw_for_plot = None 
+        is_filtered = False
+
+        # HPF Checkbox
+        use_hpf = st.sidebar.checkbox("Enable HPF (Remove Drift)", value=True)
+        if use_hpf:
+            cutoff_h = st.sidebar.slider("HPF Cutoff (Hz)", 0.1, 5.0, 0.5, step=0.1)
+            df_processed['Value'] = manual_iir_highpass(df_processed['Value'].values, cutoff_h, fs_est)
+            is_filtered = True
+            
+        # LPF Checkbox
+        use_lpf = st.sidebar.checkbox("Enable LPF (Remove High Freq)", value=True)
+        if use_lpf:
+            max_cutoff = float(fs_est / 2.0) - 1.0
+            cutoff_l = st.sidebar.slider("LPF Cutoff (Hz)", 10.0, max_cutoff, 100.0, step=1.0)
+            df_processed['Value'] = manual_iir_lowpass(df_processed['Value'].values, cutoff_l, fs_est)
+            is_filtered = True
+
+        raw_for_plot = df_raw if is_filtered else None
             
         st.subheader("Data Preview")
         min_time = float(df_processed['Index'].min())
@@ -280,6 +320,7 @@ if file_to_load is not None:
             st.markdown("---")
             st.subheader("Manual Bandpass (Global Result)")
             
+            # This takes the Pre-Filtered data (IIR) and applies Bandpass (FIR)
             global_signal = df_processed['Value'].values
             global_filtered = manual_bandpass_filter_fir(global_signal, coeffs)
             
@@ -293,7 +334,7 @@ if file_to_load is not None:
             fig_global_check = create_full_plot(df_global_filtered, x_range=final_zoom_range, raw_df=None)
             st.pyplot(fig_global_check)
 
-            # --- ADDED: MAGNITUDE FREQUENCY RESPONSE PLOT ---
+            # --- MAGNITUDE FREQUENCY RESPONSE PLOT ---
             st.markdown("---")
             st.subheader("Magnitude Frequency Response")
             
