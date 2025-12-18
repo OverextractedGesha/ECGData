@@ -15,7 +15,7 @@ def manual_mean(data):
     return total / count
 
 def manual_square_signal(data):
-    # Reverted to original loop implementation
+    # Original loop implementation
     n = len(data)
     y = np.zeros(n)
     for i in range(n):
@@ -127,12 +127,37 @@ def calculate_dft(df_segment, fs):
     return xf_positive, yf_positive_magnitude, fs
 
 def calculate_dft_response(coeffs, fs, num_points=1000):
-    padded_h = np.zeros(num_points)
-    padded_h[0:len(coeffs)] = coeffs
-    fft_response = np.fft.fft(padded_h)
-    half_point = num_points // 2
-    freqs = np.linspace(0, fs/2, half_point)
-    magnitude = np.abs(fft_response[:half_point])
+    # --- MANUAL DFT CALCULATION (No FFT Libraries) ---
+    # We calculate the Frequency Response H(w) at specific frequency points
+    
+    N_h = len(coeffs)
+    half_points = num_points // 2
+    
+    freqs = np.zeros(half_points)
+    magnitude = np.zeros(half_points)
+    
+    # Iterate over frequency bins k (from 0 to Nyquist)
+    for k in range(half_points):
+        
+        # Determine the physical frequency for this bin
+        # Corresponds to w = 2*pi*k / num_points
+        freq_hz = k * fs / num_points
+        freqs[k] = freq_hz
+        
+        real_sum = 0.0
+        imag_sum = 0.0
+        
+        # Iterate over filter coefficients h[n]
+        for n in range(N_h):
+            angle = 2 * np.pi * k * n / num_points
+            
+            # Euler's Formula: h[n] * e^(-j*angle)
+            real_sum += coeffs[n] * np.cos(angle)
+            imag_sum -= coeffs[n] * np.sin(angle)
+            
+        # Magnitude = sqrt(Real^2 + Imag^2)
+        magnitude[k] = np.sqrt(real_sum**2 + imag_sum**2)
+        
     return freqs, magnitude
 
 # --- 5. Plotting Helper ---
@@ -331,7 +356,7 @@ if file_to_load is not None:
             st.markdown("---")
             st.subheader("Magnitude Frequency Response")
             
-            # Calculate response for plotting
+            # Calculate response for plotting using manual function
             freqs, mag = calculate_dft_response(coeffs, fs_est)
             
             fig_freq, ax_freq = plt.subplots(figsize=(10, 5))
@@ -352,7 +377,6 @@ if file_to_load is not None:
             st.pyplot(fig_freq)
 
             st.markdown("---")
-            # Updated Header and added Equation
             st.subheader("6. Squaring Process")
             st.latex(r"y[n] = (x[n])^2")
 
@@ -362,21 +386,18 @@ if file_to_load is not None:
             window_samples = int(window_ms * fs_est / 1000.0)
             if window_samples < 1: window_samples = 1
             
-            # MAV calculation is still needed for the next section
             global_mav = manual_moving_average_filter(global_squared, window_samples)
 
             fig_compare, ax_comb = plt.subplots(figsize=(10, 6))
-            # Plot only the squared signal, with solid purple color and no transparency
+            
             ax_comb.plot(df_global_filtered['Index'], global_squared, color='purple', label='Squared Signal', linewidth=1.5)
             
-            # Updated Title and Y-label
             ax_comb.set_title('Squaring Result')
             ax_comb.set_ylabel('Amplitude (mV²)')
             ax_comb.set_xlabel('Time (s)')
             ax_comb.grid(True, alpha=0.3)
             ax_comb.legend(loc="upper right")
             
-            # Ensure Y-axis starts at 0
             ax_comb.set_ylim(bottom=0)
             ax_comb.set_xlim(final_zoom_range)
             
