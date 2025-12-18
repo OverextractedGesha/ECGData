@@ -161,7 +161,7 @@ def calculate_dft(df_segment, fs):
 
 st.title("ECG Analysis")
 
-st.sidebar.header("1. Data Load")
+st.sidebar.header("Data Load")
 uploaded_file = st.sidebar.file_uploader("Choose a csv file", type="csv")
 
 file_to_load = None
@@ -390,4 +390,5 @@ if file_to_load is not None:
             ax_bot.set_xlim(final_zoom_range) 
             
             st.pyplot(fig_th)
+
 
