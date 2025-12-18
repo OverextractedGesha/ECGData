@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import os
 
-# --- 1. Basic Math Helpers (UNCHANGED) ---
+# --- 1. Basic Math Helpers ---
 def manual_mean(data):
     total = 0.0
     count = 0
@@ -15,18 +15,14 @@ def manual_mean(data):
     return total / count
 
 def manual_square_signal(data):
-    n = len(data)
-    y = np.zeros(n)
-    for i in range(n):
-        y[i] = data[i] * data[i]
-    return y
+    # Squares the signal. Result is strictly positive.
+    return data ** 2
 
 def manual_moving_average_filter(data, window_size):
     n = len(data)
     window_size = int(window_size)
     if window_size < 1: return data
     y = np.zeros(n)
-    # Optimized convolution for speed (equivalent to loop)
     kernel = np.ones(window_size) / window_size
     y = np.convolve(data, kernel, mode='same')
     return y
@@ -47,7 +43,7 @@ def manual_threshold_and_count(data, threshold):
             beats_count += 1
     return binary_signal, beats_count
 
-# --- 2. IIR Filters (Restored) ---
+# --- 2. IIR Filters (Pre-Filtering) ---
 def manual_iir_lowpass(data, cutoff, fs):
     if cutoff <= 0: return data
     n = len(data)
@@ -78,7 +74,6 @@ def sinc_func(x):
     return np.sin(np.pi * x) / (np.pi * x)
 
 def design_fir_coeffs(N, fs, f_low, f_high):
-    # Rectangular Window Design (Homework Method)
     alpha = (N - 1) / 2.0
     fc_low = f_low / fs
     fc_high = f_high / fs
@@ -86,18 +81,15 @@ def design_fir_coeffs(N, fs, f_low, f_high):
     
     for n in range(N):
         m = n - alpha
-        # Ideal Bandpass = Lowpass(High) - Lowpass(Low)
         term1 = 2 * fc_high * sinc_func(2 * fc_high * m)
         term2 = 2 * fc_low * sinc_func(2 * fc_low * m)
         h[n] = term1 - term2
-        # No window multiplication = Rectangular Window
-        
     return h
 
 def manual_bandpass_filter_fir(data, coeffs):
     return np.convolve(data, coeffs, mode='same')
 
-# --- 4. DFT Helpers (UNCHANGED) ---
+# --- 4. DFT Helpers ---
 @st.cache_data
 def calculate_dft(df_segment, fs):
     N_dft = 200
@@ -130,7 +122,6 @@ def calculate_dft(df_segment, fs):
     return xf_positive, yf_positive_magnitude, fs
 
 def calculate_dft_response(coeffs, fs, num_points=1000):
-    # Helper for the frequency response plot
     padded_h = np.zeros(num_points)
     padded_h[0:len(coeffs)] = coeffs
     fft_response = np.fft.fft(padded_h)
@@ -139,7 +130,7 @@ def calculate_dft_response(coeffs, fs, num_points=1000):
     magnitude = np.abs(fft_response[:half_point])
     return freqs, magnitude
 
-# --- 5. Plotting Helper (UNCHANGED) ---
+# --- 5. Plotting Helper ---
 @st.cache_data
 def load_data(file_path_or_buffer):
     try:
@@ -185,21 +176,19 @@ if file_to_load is not None:
             fs_est = 100.0
         st.sidebar.write(f"**Fs:** {fs_est:.1f} Hz")
         
-        # --- GLOBAL PRE-FILTERING (IIR Restored) ---
+        # --- GLOBAL PRE-FILTERING ---
         st.sidebar.markdown("---")
         st.sidebar.header("2. Pre-Filtering (Global)")
         
         df_processed = df_raw.copy()
         is_filtered = False
 
-        # HPF Checkbox
         use_hpf = st.sidebar.checkbox("Enable HPF (Remove Drift)", value=True)
         if use_hpf:
             cutoff_h = st.sidebar.slider("HPF Cutoff (Hz)", 0.1, 5.0, 0.5, step=0.1)
             df_processed['Value'] = manual_iir_highpass(df_processed['Value'].values, cutoff_h, fs_est)
             is_filtered = True
             
-        # LPF Checkbox
         use_lpf = st.sidebar.checkbox("Enable LPF (Remove High Freq)", value=True)
         if use_lpf:
             max_cutoff = float(fs_est / 2.0) - 1.0
@@ -274,7 +263,7 @@ if file_to_load is not None:
                 high_dft = st.number_input("High Cutoff (Hz)", min_value=1.0, value=15.0, step=1.0)
             with c_ord:
                 # Set default to 5 to match Homework, user can increase for better filtering
-                fir_order = st.number_input("Filter Order (N)", min_value=3, value=5, step=2)
+                fir_order = st.number_input("Filter Order (N)", min_value=1, value=5, step=2)
 
             # Calculate FIR Coefficients
             coeffs = design_fir_coeffs(fir_order, fs_est, low_dft, high_dft)
@@ -377,7 +366,11 @@ if file_to_load is not None:
             ax_comb.set_xlabel('Time (s)')
             ax_comb.grid(True, alpha=0.3)
             ax_comb.legend(loc="upper right")
+            
+            # --- FIX: Ensure Y-axis starts at 0 to prove signal is positive ---
+            ax_comb.set_ylim(bottom=0)
             ax_comb.set_xlim(final_zoom_range)
+            
             st.pyplot(fig_compare)
 
             st.markdown("---")
@@ -427,6 +420,7 @@ if file_to_load is not None:
             ax_top.set_ylabel("Amplitude")
             ax_top.legend(loc='upper right')
             ax_top.grid(True, alpha=0.3)
+            ax_top.set_ylim(bottom=0) # Also setting this to 0 for consistency
 
             ax_bot.plot(segment_time, binary_segment, color='red', label='Detected Pulse', drawstyle='steps-pre')
             ax_bot.fill_between(segment_time, binary_segment, step='pre', color='red', alpha=0.3)
