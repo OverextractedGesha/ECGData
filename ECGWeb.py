@@ -358,7 +358,7 @@ if file_to_load is not None:
             st.pyplot(fig_compare)
 
             st.markdown("---")
-            st.subheader("Thresholding & BPM Calculation (Segment)")
+            st.subheader("Thresholding & BPM Calculation")
 
             st.write("Select the time range to analyze:")
             min_t = float(df_global_filtered['Index'].min())
@@ -414,3 +414,4 @@ if file_to_load is not None:
             ax_bot.grid(True, alpha=0.3)
             
             st.pyplot(fig_th)
+
