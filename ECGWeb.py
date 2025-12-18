@@ -161,7 +161,7 @@ def calculate_dft(df_segment, fs):
 
 st.title("ECG Analysis")
 
-st.sidebar.header("Data Load")
+st.sidebar.header("1. Data Load")
 uploaded_file = st.sidebar.file_uploader("Choose a csv file", type="csv")
 
 file_to_load = None
@@ -358,37 +358,59 @@ if file_to_load is not None:
             st.pyplot(fig_compare)
 
             st.markdown("---")
-            st.subheader("Thresholding")
+            st.subheader("Thresholding & BPM Calculation (Segment)")
 
-            max_mav = np.max(global_mav) 
-            st.write(f"**Max MAV Amplitude:** {max_mav:.4f}")
+            st.write("Select the time range to analyze:")
+            min_t = float(df_global_filtered['Index'].min())
+            max_t = float(df_global_filtered['Index'].max())
 
-            threshold_perc = st.slider("Set Threshold Level (% of Max)", 0, 100, 40, step=1)
-            threshold_val = max_mav * (threshold_perc / 100.0)
+            c1, c2 = st.columns(2)
+            with c1:
+                calc_start = st.number_input("Calculation Start (s)", min_value=min_t, max_value=max_t, value=min_t, step=0.1)
+            with c2:
+                calc_end = st.number_input("Calculation End (s)", min_value=min_t, max_value=max_t, value=max_t, step=0.1)
 
-            binary_signal, beats_detected = manual_threshold_and_count(global_mav, threshold_val)
+            mask = (df_global_filtered['Index'] >= calc_start) & (df_global_filtered['Index'] <= calc_end)
             
-            st.metric("Estimasi Detak Jantung (Beats Detected)", beats_detected)
+            segment_mav = global_mav[mask]
+            segment_time = df_global_filtered['Index'][mask]
+
+            # --- Changed from Global Max to Segment Max ---
+            if len(segment_mav) > 0:
+                max_mav_segment = np.max(segment_mav)
+            else:
+                max_mav_segment = 0.0
+
+            st.write(f"**Max MAV Amplitude (Segment):** {max_mav_segment:.4f}")
+
+            threshold_perc = st.slider("Set Threshold Level (% of Segment Max)", 0, 100, 40, step=1)
+            threshold_val = max_mav_segment * (threshold_perc / 100.0)
+
+            binary_segment, beats_detected = manual_threshold_and_count(segment_mav, threshold_val)
+            
+            duration_seconds = calc_end - calc_start
+            bpm = 0.0
+            if duration_seconds > 0:
+                bpm = (beats_detected / duration_seconds) * 60.0
+            
+            col_res1, col_res2 = st.columns(2)
+            col_res1.metric("Beats Found (Segment)", beats_detected)
+            col_res2.metric("Heart Rate (BPM)", f"{bpm:.1f}")
 
             fig_th, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
-            ax_top.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Signal')
-            ax_top.axhline(threshold_val, color='black', linestyle='--', label=f'Threshold ({threshold_perc}%)')
-            ax_top.set_title("Analog Signal (MAV) & Threshold")
+            ax_top.plot(segment_time, segment_mav, color='orange', label='MAV Segment')
+            ax_top.axhline(threshold_val, color='black', linestyle='--', label=f'Threshold')
+            ax_top.set_title(f"Analysis Segment ({calc_start}s to {calc_end}s)")
             ax_top.set_ylabel("Amplitude")
-            ax_top.grid(True, alpha=0.3)
             ax_top.legend(loc='upper right')
+            ax_top.grid(True, alpha=0.3)
 
-            ax_bot.plot(df_global_filtered['Index'], binary_signal, color='red', label='Digital Pulse', drawstyle='steps-pre')
-            ax_bot.fill_between(df_global_filtered['Index'], binary_signal, step='pre', color='red', alpha=0.3)
-            ax_bot.set_title("Digital Output (Binary)")
+            ax_bot.plot(segment_time, binary_segment, color='red', label='Detected Pulse', drawstyle='steps-pre')
+            ax_bot.fill_between(segment_time, binary_segment, step='pre', color='red', alpha=0.3)
             ax_bot.set_ylabel("Logic State (0/1)")
             ax_bot.set_xlabel("Time (s)")
             ax_bot.set_ylim(-0.1, 1.2)
             ax_bot.grid(True, alpha=0.3)
             
-            ax_bot.set_xlim(final_zoom_range) 
-            
             st.pyplot(fig_th)
-
-
