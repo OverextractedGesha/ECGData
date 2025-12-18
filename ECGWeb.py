@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 import os
 
+# --- Helper Functions ---
+
 def manual_mean(data):
     total = 0.0
     count = 0
@@ -87,23 +89,7 @@ def design_fir_coeffs(N, fs, f_low, f_high):
     return h
 
 def manual_bandpass_filter_fir(data, coeffs):
-    n_data = len(data)
-    n_coeffs = len(coeffs)
-    y = np.zeros(n_data)
-    
-    offset = n_coeffs // 2
-    
-    for i in range(n_data):
-        sum_val = 0.0
-        for j in range(n_coeffs):
-            data_idx = i - j + offset
-            
-            if 0 <= data_idx < n_data:
-                sum_val += data[data_idx] * coeffs[j]
-        
-        y[i] = sum_val
-        
-    return y
+    return np.convolve(data, coeffs, mode='same')
 
 @st.cache_data
 def calculate_dft(df_segment, fs):
@@ -181,269 +167,275 @@ def create_full_plot(df, x_range=None, raw_df=None):
     ax.legend()
     return fig
 
-st.title("ECG Analysis")
+# --- Main Application Logic ---
 
-st.sidebar.header("1. Data Load")
-uploaded_file = st.sidebar.file_uploader("Choose a csv file", type="csv")
-file_to_load = "DataHiMe.csv" if os.path.exists("DataHiMe.csv") else None
-if uploaded_file is not None: file_to_load = uploaded_file
+def main():
+    st.title("ECG Analysis")
 
-if file_to_load is not None:
-    df_raw = load_data(file_to_load)
-    
-    if df_raw is not None:
-        try:
-            time_diffs = np.diff(df_raw['Index'])
-            fs_est = 1.0 / np.median(time_diffs)
-        except:
-            fs_est = 100.0
-        st.sidebar.write(f"**Fs:** {fs_est:.1f} Hz")
+    st.sidebar.header("1. Data Load")
+    uploaded_file = st.sidebar.file_uploader("Choose a csv file", type="csv")
+    file_to_load = "DataHiMe.csv" if os.path.exists("DataHiMe.csv") else None
+    if uploaded_file is not None: file_to_load = uploaded_file
+
+    if file_to_load is not None:
+        df_raw = load_data(file_to_load)
         
-        st.sidebar.markdown("---")
-        st.sidebar.header("2. Pre-Filtering (Global)")
-        
-        df_processed = df_raw.copy()
-        is_filtered = False
-
-        use_hpf = st.sidebar.checkbox("Enable HPF (Remove Drift)", value=True)
-        if use_hpf:
-            cutoff_h = st.sidebar.slider("HPF Cutoff (Hz)", 0.1, 5.0, 0.5, step=0.1)
-            df_processed['Value'] = manual_iir_highpass(df_processed['Value'].values, cutoff_h, fs_est)
-            is_filtered = True
+        if df_raw is not None:
+            try:
+                time_diffs = np.diff(df_raw['Index'])
+                fs_est = 1.0 / np.median(time_diffs)
+            except:
+                fs_est = 100.0
+            st.sidebar.write(f"**Fs:** {fs_est:.1f} Hz")
             
-        use_lpf = st.sidebar.checkbox("Enable LPF (Remove High Freq)", value=True)
-        if use_lpf:
-            max_cutoff = float(fs_est / 2.0) - 1.0
-            cutoff_l = st.sidebar.slider("LPF Cutoff (Hz)", 10.0, max_cutoff, 100.0, step=1.0)
-            df_processed['Value'] = manual_iir_lowpass(df_processed['Value'].values, cutoff_l, fs_est)
-            is_filtered = True
-
-        raw_for_plot = df_raw if is_filtered else None
+            st.sidebar.markdown("---")
+            st.sidebar.header("2. Pre-Filtering (Global)")
             
-        st.subheader("Data Preview")
-        min_time = float(df_processed['Index'].min())
-        max_time = float(df_processed['Index'].max())
-        
-        col1, col2 = st.columns([3, 1])
-        with col1:
-              zoom_range = st.slider("Zoom (Time Range)", min_time, max_time, (min_time, max_time))
-        
-        fig_full = create_full_plot(df_processed, zoom_range, raw_df=raw_for_plot) 
-        st.pyplot(fig_full)
+            df_processed = df_raw.copy()
+            is_filtered = False
 
-        st.subheader("Select a Single ECG Cycle")
-        default_duration = (max_time - min_time) * 0.1
-        if default_duration == 0: default_duration = 1.0
-        default_start = min_time
-        default_end = min(min_time + default_duration, max_time)
+            use_hpf = st.sidebar.checkbox("Enable HPF (Remove Drift)", value=True)
+            if use_hpf:
+                cutoff_h = st.sidebar.slider("HPF Cutoff (Hz)", 0.1, 5.0, 0.5, step=0.1)
+                df_processed['Value'] = manual_iir_highpass(df_processed['Value'].values, cutoff_h, fs_est)
+                is_filtered = True
+                
+            use_lpf = st.sidebar.checkbox("Enable LPF (Remove High Freq)", value=True)
+            if use_lpf:
+                max_cutoff = float(fs_est / 2.0) - 1.0
+                cutoff_l = st.sidebar.slider("LPF Cutoff (Hz)", 10.0, max_cutoff, 100.0, step=1.0)
+                df_processed['Value'] = manual_iir_lowpass(df_processed['Value'].values, cutoff_l, fs_est)
+                is_filtered = True
 
-        with st.form(key='ecg_cycle_form'):
-            c1, c2 = st.columns(2)
-            with c1: start_input = st.number_input('Start Time', value=default_start, step=0.01, format="%.3f")
-            with c2: end_input = st.number_input('End Time', value=default_end, step=0.01, format="%.3f")
-            submit_button = st.form_submit_button(label='Analyze Cycle')
-
-        if submit_button:
-            if start_input >= end_input:
-                st.error("Error: Start < End")
-            else:
-                st.session_state.cycle_selected = True
-                st.session_state.start_index = start_input
-                st.session_state.end_index = end_input
-
-        if st.session_state.get('cycle_selected', False):
-            start_index = st.session_state.start_index
-            end_index = st.session_state.end_index
-            df_cycle = df_processed[(df_processed['Index'] >= start_index) & (df_processed['Index'] <= end_index)].copy()
-
-            st.subheader("Identify Complexes")
-            dur = end_index - start_index
-            p_range = st.slider("P Wave", start_index, end_index, (start_index, start_index + dur*0.15), step=0.01)
-            qrs_range = st.slider("QRS Complex", start_index, end_index, (start_index + dur*0.2, start_index + dur*0.4), step=0.01)
-            t_range = st.slider("T Wave", start_index, end_index, (start_index + dur*0.5, start_index + dur*0.8), step=0.01)
-
-            st.session_state.p_data = df_cycle[(df_cycle['Index'] >= p_range[0]) & (df_cycle['Index'] <= p_range[1])]
-            st.session_state.qrs_data = df_cycle[(df_cycle['Index'] >= qrs_range[0]) & (df_cycle['Index'] <= qrs_range[1])]
-            st.session_state.t_data = df_cycle[(df_cycle['Index'] >= t_range[0]) & (df_cycle['Index'] <= t_range[1])]
-
-            fig_hl, ax_hl = plt.subplots(figsize=(10, 4))
-            ax_hl.plot(df_cycle['Index'], df_cycle['Value'], 'k', alpha=0.8)
-            ax_hl.axvspan(p_range[0], p_range[1], color='blue', alpha=0.2, label='P')
-            ax_hl.axvspan(qrs_range[0], qrs_range[1], color='red', alpha=0.2, label='QRS')
-            ax_hl.axvspan(t_range[0], t_range[1], color='green', alpha=0.2, label='T')
-            ax_hl.legend()
-            st.pyplot(fig_hl)
-
-            st.markdown("---")
-            st.subheader("Segment Analysis")
+            raw_for_plot = df_raw if is_filtered else None
+                
+            st.subheader("Data Preview")
+            min_time = float(df_processed['Index'].min())
+            max_time = float(df_processed['Index'].max())
             
-            st.write("Define FIR Bandpass Parameters (Rectangular Window):")
-            c_freq1, c_freq2, c_ord = st.columns(3)
-            with c_freq1: 
-                low_dft = st.number_input("Low Cutoff (Hz)", min_value=0.1, value=5.0, step=0.5)
-            with c_freq2: 
-                high_dft = st.number_input("High Cutoff (Hz)", min_value=1.0, value=15.0, step=1.0)
-            with c_ord:
-                fir_order = st.slider("Filter Order (N)", min_value=1, max_value=101, value=5, step=2)
-
-            coeffs = design_fir_coeffs(fir_order, fs_est, low_dft, high_dft)
-
-            xf_p, yf_p, _ = calculate_dft(st.session_state.p_data, fs_est)
-            xf_qrs, yf_qrs, _ = calculate_dft(st.session_state.qrs_data, fs_est)
-            xf_t, yf_t, _ = calculate_dft(st.session_state.t_data, fs_est)
-
-            st.write("DFT Spectrum")
-            fig_dft, ax_dft = plt.subplots(figsize=(10, 5))
-            if len(xf_p)>0: ax_dft.plot(xf_p, yf_p, label='P', color='blue')
-            if len(xf_qrs)>0: ax_dft.plot(xf_qrs, yf_qrs, label='QRS', color='red')
-            if len(xf_t)>0: ax_dft.plot(xf_t, yf_t, label='T', color='green')
-            ax_dft.axvline(low_dft, c='k', ls='--', alpha=0.5, label='Bandpass Limits')
-            ax_dft.axvline(high_dft, c='k', ls='--', alpha=0.5)
-            ax_dft.set_xlabel("Frequency (Hz)")
-            ax_dft.set_ylabel("Magnitude")
-            ax_dft.legend()
-            st.pyplot(fig_dft)
-
-            p_raw = st.session_state.p_data['Value'].values
-            p_filt = manual_bandpass_filter_fir(p_raw, coeffs)
-            qrs_raw = st.session_state.qrs_data['Value'].values
-            qrs_filt = manual_bandpass_filter_fir(qrs_raw, coeffs)
-            t_raw = st.session_state.t_data['Value'].values
-            t_filt = manual_bandpass_filter_fir(t_raw, coeffs)
-
-            st.write("Individual Segment Reconstruction")
-            fig_rec, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
-            ax1.set_title("P Wave")
-            ax1.plot(st.session_state.p_data['Index'], p_raw, color='lightgray', label='Input')
-            ax1.plot(st.session_state.p_data['Index'], p_filt, color='blue', label='Filtered')
-            ax1.legend()
-            ax2.set_title("QRS Complex")
-            ax2.plot(st.session_state.qrs_data['Index'], qrs_raw, color='lightgray', label='Input')
-            ax2.plot(st.session_state.qrs_data['Index'], qrs_filt, color='red', label='Filtered')
-            ax3.set_title("T Wave")
-            ax3.plot(st.session_state.t_data['Index'], t_raw, color='lightgray', label='Input')
-            ax3.plot(st.session_state.t_data['Index'], t_filt, color='green', label='Filtered')
-            st.pyplot(fig_rec)
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                  zoom_range = st.slider("Zoom (Time Range)", min_time, max_time, (min_time, max_time))
             
-            st.markdown("---")
-            st.subheader("Manual Bandpass (Global Result)")
-            
-            global_signal = df_processed['Value'].values
-            global_filtered = manual_bandpass_filter_fir(global_signal, coeffs)
-            
-            df_global_filtered = df_processed.copy()
-            df_global_filtered['Value'] = global_filtered
-            
-            final_min_t = float(df_global_filtered['Index'].min())
-            final_max_t = float(df_global_filtered['Index'].max())
-            
-            final_zoom_range = st.slider("Final Result Zoom", min_value=final_min_t, max_value=final_max_t, value=(final_min_t, final_max_t))
-            fig_global_check = create_full_plot(df_global_filtered, x_range=final_zoom_range, raw_df=None)
-            st.pyplot(fig_global_check)
+            fig_full = create_full_plot(df_processed, zoom_range, raw_df=raw_for_plot) 
+            st.pyplot(fig_full)
 
-            st.markdown("---")
-            st.subheader("Magnitude Frequency Response")
-            
-            freqs, mag = calculate_dft_response(coeffs, fs_est)
-            
-            fig_freq, ax_freq = plt.subplots(figsize=(10, 5))
-            ax_freq.plot(freqs, mag, color='blue', linewidth=2)
-            
-            ax_freq.set_title(f"Magnitude Frequency Response (N={fir_order}, Rectangular)", fontsize=12)
-            ax_freq.set_xlabel("Frequency (Hz)")
-            ax_freq.set_ylabel("Magnitude")
-            ax_freq.set_xlim(0, fs_est / 2) 
-            
-            ax_freq.axvline(low_dft, color='red', linestyle='--', alpha=0.5, label=f'Low ({low_dft}Hz)')
-            ax_freq.axvline(high_dft, color='red', linestyle='--', alpha=0.5, label=f'High ({high_dft}Hz)')
-            
-            ax_freq.grid(True, color='gray', linestyle='-', linewidth=0.5, alpha=0.5)
-            ax_freq.legend()
-            st.pyplot(fig_freq)
+            st.subheader("Select a Single ECG Cycle")
+            default_duration = (max_time - min_time) * 0.1
+            if default_duration == 0: default_duration = 1.0
+            default_start = min_time
+            default_end = min(min_time + default_duration, max_time)
 
-            st.markdown("---")
-            st.subheader("6. Squaring Process & MAV Overlay")
-            st.latex(r"y[n] = (x[n])^2")
+            with st.form(key='ecg_cycle_form'):
+                c1, c2 = st.columns(2)
+                with c1: start_input = st.number_input('Start Time', value=default_start, step=0.01, format="%.3f")
+                with c2: end_input = st.number_input('End Time', value=default_end, step=0.01, format="%.3f")
+                submit_button = st.form_submit_button(label='Analyze Cycle')
 
-            global_squared = manual_square_signal(global_filtered)
+            if submit_button:
+                if start_input >= end_input:
+                    st.error("Error: Start < End")
+                else:
+                    st.session_state.cycle_selected = True
+                    st.session_state.start_index = start_input
+                    st.session_state.end_index = end_input
 
-            window_ms = st.slider("MAV Window Width (ms)", 10, 400, 150, step=10)
-            window_samples = int(window_ms * fs_est / 1000.0)
-            if window_samples < 1: window_samples = 1
-            
-            global_mav = manual_moving_average_filter(global_squared, window_samples)
+            if st.session_state.get('cycle_selected', False):
+                start_index = st.session_state.start_index
+                end_index = st.session_state.end_index
+                df_cycle = df_processed[(df_processed['Index'] >= start_index) & (df_processed['Index'] <= end_index)].copy()
 
-            fig_compare, ax_comb = plt.subplots(figsize=(10, 6))
-            
-            ax_comb.plot(df_global_filtered['Index'], global_squared, color='purple', label='Squared Signal', linewidth=1.5, alpha=0.3)
-            
-            ax_comb.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Output', linewidth=2.0)
-            
-            ax_comb.set_title('Squaring (Low Opacity) vs MAV (Solid)')
-            ax_comb.set_ylabel('Amplitude (mV²)')
-            ax_comb.set_xlabel('Time (s)')
-            ax_comb.grid(True, alpha=0.3)
-            ax_comb.legend(loc="upper right")
-            
-            ax_comb.set_ylim(bottom=0)
-            ax_comb.set_xlim(final_zoom_range)
-            
-            st.pyplot(fig_compare)
+                st.subheader("Identify Complexes")
+                dur = end_index - start_index
+                p_range = st.slider("P Wave", start_index, end_index, (start_index, start_index + dur*0.15), step=0.01)
+                qrs_range = st.slider("QRS Complex", start_index, end_index, (start_index + dur*0.2, start_index + dur*0.4), step=0.01)
+                t_range = st.slider("T Wave", start_index, end_index, (start_index + dur*0.5, start_index + dur*0.8), step=0.01)
 
-            st.markdown("---")
-            st.subheader("Thresholding & BPM Calculation (Segment)")
+                st.session_state.p_data = df_cycle[(df_cycle['Index'] >= p_range[0]) & (df_cycle['Index'] <= p_range[1])]
+                st.session_state.qrs_data = df_cycle[(df_cycle['Index'] >= qrs_range[0]) & (df_cycle['Index'] <= qrs_range[1])]
+                st.session_state.t_data = df_cycle[(df_cycle['Index'] >= t_range[0]) & (df_cycle['Index'] <= t_range[1])]
 
-            st.write("Select the time range to analyze:")
-            min_t = float(df_global_filtered['Index'].min())
-            max_t = float(df_global_filtered['Index'].max())
+                fig_hl, ax_hl = plt.subplots(figsize=(10, 4))
+                ax_hl.plot(df_cycle['Index'], df_cycle['Value'], 'k', alpha=0.8)
+                ax_hl.axvspan(p_range[0], p_range[1], color='blue', alpha=0.2, label='P')
+                ax_hl.axvspan(qrs_range[0], qrs_range[1], color='red', alpha=0.2, label='QRS')
+                ax_hl.axvspan(t_range[0], t_range[1], color='green', alpha=0.2, label='T')
+                ax_hl.legend()
+                st.pyplot(fig_hl)
 
-            c1, c2 = st.columns(2)
-            with c1:
-                calc_start = st.number_input("Calculation Start (s)", min_value=min_t, max_value=max_t, value=min_t, step=0.1)
-            with c2:
-                calc_end = st.number_input("Calculation End (s)", min_value=min_t, max_value=max_t, value=max_t, step=0.1)
+                st.markdown("---")
+                st.subheader("Segment Analysis")
+                
+                st.write("Define FIR Bandpass Parameters (Rectangular Window):")
+                c_freq1, c_freq2, c_ord = st.columns(3)
+                with c_freq1: 
+                    low_dft = st.number_input("Low Cutoff (Hz)", min_value=0.1, value=5.0, step=0.5)
+                with c_freq2: 
+                    high_dft = st.number_input("High Cutoff (Hz)", min_value=1.0, value=15.0, step=1.0)
+                with c_ord:
+                    fir_order = st.slider("Filter Order (N)", min_value=1, max_value=101, value=5, step=2)
 
-            mask = (df_global_filtered['Index'] >= calc_start) & (df_global_filtered['Index'] <= calc_end)
-            
-            segment_mav = global_mav[mask]
-            segment_time = df_global_filtered['Index'][mask]
+                coeffs = design_fir_coeffs(fir_order, fs_est, low_dft, high_dft)
 
-            if len(segment_mav) > 0:
-                max_mav_segment = np.max(segment_mav)
-            else:
-                max_mav_segment = 0.0
+                xf_p, yf_p, _ = calculate_dft(st.session_state.p_data, fs_est)
+                xf_qrs, yf_qrs, _ = calculate_dft(st.session_state.qrs_data, fs_est)
+                xf_t, yf_t, _ = calculate_dft(st.session_state.t_data, fs_est)
 
-            st.write(f"**Max MAV Amplitude (Segment):** {max_mav_segment:.4f}")
+                st.write("DFT Spectrum")
+                fig_dft, ax_dft = plt.subplots(figsize=(10, 5))
+                if len(xf_p)>0: ax_dft.plot(xf_p, yf_p, label='P', color='blue')
+                if len(xf_qrs)>0: ax_dft.plot(xf_qrs, yf_qrs, label='QRS', color='red')
+                if len(xf_t)>0: ax_dft.plot(xf_t, yf_t, label='T', color='green')
+                ax_dft.axvline(low_dft, c='k', ls='--', alpha=0.5, label='Bandpass Limits')
+                ax_dft.axvline(high_dft, c='k', ls='--', alpha=0.5)
+                ax_dft.set_xlabel("Frequency (Hz)")
+                ax_dft.set_ylabel("Magnitude")
+                ax_dft.legend()
+                st.pyplot(fig_dft)
 
-            threshold_perc = st.slider("Set Threshold Level (% of Segment Max)", 0, 100, 40, step=1)
-            threshold_val = max_mav_segment * (threshold_perc / 100.0)
+                p_raw = st.session_state.p_data['Value'].values
+                p_filt = manual_bandpass_filter_fir(p_raw, coeffs)
+                qrs_raw = st.session_state.qrs_data['Value'].values
+                qrs_filt = manual_bandpass_filter_fir(qrs_raw, coeffs)
+                t_raw = st.session_state.t_data['Value'].values
+                t_filt = manual_bandpass_filter_fir(t_raw, coeffs)
 
-            binary_segment, beats_detected = manual_threshold_and_count(segment_mav, threshold_val)
-            
-            duration_seconds = calc_end - calc_start
-            bpm = 0.0
-            if duration_seconds > 0:
-                bpm = (beats_detected / duration_seconds) * 60.0
-            
-            col_res1, col_res2 = st.columns(2)
-            col_res1.metric("Beats Found (Segment)", beats_detected)
-            col_res2.metric("Heart Rate (BPM)", f"{bpm:.1f}")
+                st.write("Individual Segment Reconstruction")
+                fig_rec, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+                ax1.set_title("P Wave")
+                ax1.plot(st.session_state.p_data['Index'], p_raw, color='lightgray', label='Input')
+                ax1.plot(st.session_state.p_data['Index'], p_filt, color='blue', label='Filtered')
+                ax1.legend()
+                ax2.set_title("QRS Complex")
+                ax2.plot(st.session_state.qrs_data['Index'], qrs_raw, color='lightgray', label='Input')
+                ax2.plot(st.session_state.qrs_data['Index'], qrs_filt, color='red', label='Filtered')
+                ax3.set_title("T Wave")
+                ax3.plot(st.session_state.t_data['Index'], t_raw, color='lightgray', label='Input')
+                ax3.plot(st.session_state.t_data['Index'], t_filt, color='green', label='Filtered')
+                st.pyplot(fig_rec)
+                
+                st.markdown("---")
+                st.subheader("Manual Bandpass (Global Result)")
+                
+                global_signal = df_processed['Value'].values
+                global_filtered = manual_bandpass_filter_fir(global_signal, coeffs)
+                
+                df_global_filtered = df_processed.copy()
+                df_global_filtered['Value'] = global_filtered
+                
+                final_min_t = float(df_global_filtered['Index'].min())
+                final_max_t = float(df_global_filtered['Index'].max())
+                
+                final_zoom_range = st.slider("Final Result Zoom", min_value=final_min_t, max_value=final_max_t, value=(final_min_t, final_max_t))
+                fig_global_check = create_full_plot(df_global_filtered, x_range=final_zoom_range, raw_df=None)
+                st.pyplot(fig_global_check)
 
-            fig_th, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+                st.markdown("---")
+                st.subheader("Magnitude Frequency Response")
+                
+                freqs, mag = calculate_dft_response(coeffs, fs_est)
+                
+                fig_freq, ax_freq = plt.subplots(figsize=(10, 5))
+                ax_freq.plot(freqs, mag, color='blue', linewidth=2)
+                
+                ax_freq.set_title(f"Magnitude Frequency Response (N={fir_order}, Rectangular)", fontsize=12)
+                ax_freq.set_xlabel("Frequency (Hz)")
+                ax_freq.set_ylabel("Magnitude")
+                ax_freq.set_xlim(0, fs_est / 2) 
+                
+                ax_freq.axvline(low_dft, color='red', linestyle='--', alpha=0.5, label=f'Low ({low_dft}Hz)')
+                ax_freq.axvline(high_dft, color='red', linestyle='--', alpha=0.5, label=f'High ({high_dft}Hz)')
+                
+                ax_freq.grid(True, color='gray', linestyle='-', linewidth=0.5, alpha=0.5)
+                ax_freq.legend()
+                st.pyplot(fig_freq)
 
-            ax_top.plot(segment_time, segment_mav, color='orange', label='MAV Segment')
-            ax_top.axhline(threshold_val, color='black', linestyle='--', label=f'Threshold')
-            ax_top.set_title(f"Analysis Segment ({calc_start}s to {calc_end}s)")
-            ax_top.set_ylabel("Amplitude")
-            ax_top.legend(loc='upper right')
-            ax_top.grid(True, alpha=0.3)
-            ax_top.set_ylim(bottom=0)
+                st.markdown("---")
+                st.subheader("6. Squaring Process & MAV Overlay")
+                st.latex(r"y[n] = (x[n])^2")
 
-            ax_bot.plot(segment_time, binary_segment, color='red', label='Detected Pulse', drawstyle='steps-pre')
-            ax_bot.fill_between(segment_time, binary_segment, step='pre', color='red', alpha=0.3)
-            ax_bot.set_ylabel("Logic State (0/1)")
-            ax_bot.set_xlabel("Time (s)")
-            ax_bot.set_ylim(-0.1, 1.2)
-            ax_bot.grid(True, alpha=0.3)
-            
-            st.pyplot(fig_th)
+                global_squared = manual_square_signal(global_filtered)
+
+                window_ms = st.slider("MAV Window Width (ms)", 10, 400, 150, step=10)
+                window_samples = int(window_ms * fs_est / 1000.0)
+                if window_samples < 1: window_samples = 1
+                
+                global_mav = manual_moving_average_filter(global_squared, window_samples)
+
+                fig_compare, ax_comb = plt.subplots(figsize=(10, 6))
+                
+                ax_comb.plot(df_global_filtered['Index'], global_squared, color='purple', label='Squared Signal', linewidth=1.5, alpha=0.3)
+                
+                ax_comb.plot(df_global_filtered['Index'], global_mav, color='orange', label='MAV Output', linewidth=2.0)
+                
+                ax_comb.set_title('Squaring (Low Opacity) vs MAV (Solid)')
+                ax_comb.set_ylabel('Amplitude (mV²)')
+                ax_comb.set_xlabel('Time (s)')
+                ax_comb.grid(True, alpha=0.3)
+                ax_comb.legend(loc="upper right")
+                
+                ax_comb.set_ylim(bottom=0)
+                ax_comb.set_xlim(final_zoom_range)
+                
+                st.pyplot(fig_compare)
+
+                st.markdown("---")
+                st.subheader("Thresholding & BPM Calculation (Segment)")
+
+                st.write("Select the time range to analyze:")
+                min_t = float(df_global_filtered['Index'].min())
+                max_t = float(df_global_filtered['Index'].max())
+
+                c1, c2 = st.columns(2)
+                with c1:
+                    calc_start = st.number_input("Calculation Start (s)", min_value=min_t, max_value=max_t, value=min_t, step=0.1)
+                with c2:
+                    calc_end = st.number_input("Calculation End (s)", min_value=min_t, max_value=max_t, value=max_t, step=0.1)
+
+                mask = (df_global_filtered['Index'] >= calc_start) & (df_global_filtered['Index'] <= calc_end)
+                
+                segment_mav = global_mav[mask]
+                segment_time = df_global_filtered['Index'][mask]
+
+                if len(segment_mav) > 0:
+                    max_mav_segment = np.max(segment_mav)
+                else:
+                    max_mav_segment = 0.0
+
+                st.write(f"**Max MAV Amplitude (Segment):** {max_mav_segment:.4f}")
+
+                threshold_perc = st.slider("Set Threshold Level (% of Segment Max)", 0, 100, 40, step=1)
+                threshold_val = max_mav_segment * (threshold_perc / 100.0)
+
+                binary_segment, beats_detected = manual_threshold_and_count(segment_mav, threshold_val)
+                
+                duration_seconds = calc_end - calc_start
+                bpm = 0.0
+                if duration_seconds > 0:
+                    bpm = (beats_detected / duration_seconds) * 60.0
+                
+                col_res1, col_res2 = st.columns(2)
+                col_res1.metric("Beats Found (Segment)", beats_detected)
+                col_res2.metric("Heart Rate (BPM)", f"{bpm:.1f}")
+
+                fig_th, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+
+                ax_top.plot(segment_time, segment_mav, color='orange', label='MAV Segment')
+                ax_top.axhline(threshold_val, color='black', linestyle='--', label=f'Threshold')
+                ax_top.set_title(f"Analysis Segment ({calc_start}s to {calc_end}s)")
+                ax_top.set_ylabel("Amplitude")
+                ax_top.legend(loc='upper right')
+                ax_top.grid(True, alpha=0.3)
+                ax_top.set_ylim(bottom=0)
+
+                ax_bot.plot(segment_time, binary_segment, color='red', label='Detected Pulse', drawstyle='steps-pre')
+                ax_bot.fill_between(segment_time, binary_segment, step='pre', color='red', alpha=0.3)
+                ax_bot.set_ylabel("Logic State (0/1)")
+                ax_bot.set_xlabel("Time (s)")
+                ax_bot.set_ylim(-0.1, 1.2)
+                ax_bot.grid(True, alpha=0.3)
+                
+                st.pyplot(fig_th)
+
+if __name__ == "__main__":
+    main()
