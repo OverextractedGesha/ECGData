@@ -159,7 +159,6 @@ def calculate_dft_response(coeffs, fs, num_points=1000):
 def load_data(file_path_or_buffer):
     try:
         df = pd.read_csv(file_path_or_buffer, header=None)
-        # FIX: Ensure we only take the first two columns if there are extra ones
         if df.shape[1] > 2:
             df = df.iloc[:, :2]
         df.columns = ['Index', 'Value']
@@ -424,19 +423,49 @@ if file_to_load is not None:
 
             binary_segment, beats_detected = manual_threshold_and_count(segment_mav, threshold_val)
             
-            duration_seconds = calc_end - calc_start
-            bpm = 0.0
-            if duration_seconds > 0:
-                bpm = (beats_detected / duration_seconds) * 60.0
+            peak_indices = []
+            is_high = False
+            start_high_idx = 0
+            
+            for i in range(len(binary_segment)):
+                if binary_segment[i] == 1.0 and not is_high:
+                    is_high = True
+                    start_high_idx = i
+                elif binary_segment[i] == 0.0 and is_high:
+                    is_high = False
+                    window_vals = segment_mav[start_high_idx:i]
+                    if len(window_vals) > 0:
+                        local_max_offset = np.argmax(window_vals)
+                        peak_indices.append(start_high_idx + local_max_offset)
+            
+            if is_high:
+                window_vals = segment_mav[start_high_idx:]
+                if len(window_vals) > 0:
+                    local_max_offset = np.argmax(window_vals)
+                    peak_indices.append(start_high_idx + local_max_offset)
+
+            peak_times = segment_time.iloc[peak_indices].values
+            peak_values = segment_mav[peak_indices]
+
+            rr_bpm = 0.0
+            if len(peak_times) > 1:
+                rr_intervals = np.diff(peak_times) 
+                mean_rr = np.mean(rr_intervals)
+                if mean_rr > 0:
+                    rr_bpm = 60.0 / mean_rr
             
             col_res1, col_res2 = st.columns(2)
-            col_res1.metric("Beats Found (Segment)", beats_detected)
-            col_res2.metric("Heart Rate (BPM)", f"{bpm:.1f}")
+            col_res1.metric("Beats Detected", len(peak_indices))
+            col_res2.metric("Heart Rate (RR Avg)", f"{rr_bpm:.1f} BPM")
 
             fig_th, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
             ax_top.plot(segment_time, segment_mav, color='orange', label='MAV Segment')
             ax_top.axhline(threshold_val, color='black', linestyle='--', label=f'Threshold')
+            
+            if len(peak_times) > 0:
+                ax_top.scatter(peak_times, peak_values, color='red', marker='x', s=100, zorder=5, label='Detected Peaks')
+
             ax_top.set_title(f"Analysis Segment ({calc_start}s to {calc_end}s)")
             ax_top.set_ylabel("Amplitude")
             ax_top.legend(loc='upper right')
