@@ -358,7 +358,7 @@ if file_to_load is not None:
             ax_freq.set_title(f"Magnitude Frequency Response (N={fir_order}, Rectangular)", fontsize=12)
             ax_freq.set_xlabel("Frequency (Hz)")
             ax_freq.set_ylabel("Magnitude")
-            ax_freq.set_xlim(0, fs_est / 2) 
+            ax_freq.set_xlim(0, 125) 
             
             ax_freq.axvline(low_dft, color='red', linestyle='--', alpha=0.5, label=f'Low ({low_dft}Hz)')
             ax_freq.axvline(high_dft, color='red', linestyle='--', alpha=0.5, label=f'High ({high_dft}Hz)')
