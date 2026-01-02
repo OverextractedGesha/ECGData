@@ -22,11 +22,15 @@ def manual_square_signal(data):
 
 def manual_moving_average_filter(data, window_size):
     n = len(data)
-    window_size = int(window_size)
-    if window_size < 1: return data
+    M = int(window_size)
+    if M < 1: return data
     y = np.zeros(n)
-    kernel = np.ones(window_size) / window_size
-    y = np.convolve(data, kernel, mode='same')
+    for i in range(n):
+        sum_val = 0.0
+        for j in range(M):
+            if i - j >= 0:
+                sum_val += data[i - j]
+        y[i] = sum_val / M
     return y
 
 def manual_threshold_and_count(data, threshold):
@@ -354,7 +358,7 @@ if file_to_load is not None:
             ax_freq.set_title(f"Magnitude Frequency Response (N={fir_order}, Rectangular)", fontsize=12)
             ax_freq.set_xlabel("Frequency (Hz)")
             ax_freq.set_ylabel("Magnitude")
-            ax_freq.set_xlim(0, fs_est / 2) 
+            ax_freq.set_xlim(0, 125) 
             
             ax_freq.axvline(low_dft, color='red', linestyle='--', alpha=0.5, label=f'Low ({low_dft}Hz)')
             ax_freq.axvline(high_dft, color='red', linestyle='--', alpha=0.5, label=f'High ({high_dft}Hz)')
